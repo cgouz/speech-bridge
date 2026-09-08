@@ -1,0 +1,16 @@
+function(mg_add_test name)
+  add_executable(${name} ${name}.cpp)
+  target_link_libraries(${name} PRIVATE magpie-tts)
+  target_include_directories(${name} PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/third_party)
+  # Run from the repo root so model/baseline paths in env vars may be relative.
+  add_test(NAME ${name} COMMAND ${name} WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+  set_tests_properties(${name} PROPERTIES SKIP_RETURN_CODE 77)
+endfunction()
+
+mg_add_test(test_model_load)
+mg_add_test(test_tokenizer_parity)
+mg_add_test(test_codec_parity)
+mg_add_test(test_encoder_parity)
+mg_add_test(test_decoder_parity)
+mg_add_test(test_lt_parity)
+mg_add_test(test_e2e_replay)

@@ -1,0 +1,23 @@
+[Unit]
+Description=Speech Bridge — local real-time speech-to-speech translation
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/opt/speechbridge/sb-server
+WorkingDirectory=/opt/speechbridge
+Environment=SB_BIND=127.0.0.1:8080
+Environment=SB_LIB_DIR=/opt/speechbridge/lib
+Environment=SB_MODELS_DIR=/opt/speechbridge/models
+Environment=SB_LOG_FORMAT=json
+Restart=on-failure
+RestartSec=2
+# Single unit; models are large. Cap RSS so a leak cannot take the host down.
+MemoryMax=8G
+TimeoutStopSec=45
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/speechbridge
+
+[Install]
+WantedBy=multi-user.target
