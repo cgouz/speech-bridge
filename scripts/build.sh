@@ -80,7 +80,7 @@ fi
 
 LIB_DIR="$ROOT/lib"
 BUILD_DIR="$ROOT/build"
-CORES=(stt)   # mt tts_magpie tts_vits join in milestone 2
+CORES=(stt mt tts_magpie tts_vits)
 
 echo "==> Speech Bridge build"
 echo "    platform   : $PLATFORM ($UNAME)"
@@ -120,6 +120,11 @@ if [[ "$DO_CORES" == "1" ]]; then
 
   echo "==> check exported symbols"
   "$ROOT/scripts/check-symbols.sh"
+
+  echo "==> one-process dlopen smoke test"
+  cmake -S "$ROOT/cores/smoke" -B "$BUILD_DIR/smoke" -DCMAKE_BUILD_TYPE="$BUILD_TYPE" >/dev/null
+  cmake --build "$BUILD_DIR/smoke" -j "$JOBS" >/dev/null
+  "$BUILD_DIR/smoke/sb_smoke" "$LIB_DIR"
 fi
 
 if [[ "$CORES_ONLY" == "1" ]]; then
