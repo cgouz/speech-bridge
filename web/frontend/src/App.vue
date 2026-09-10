@@ -4,13 +4,14 @@ import SetupPanel from './components/SetupPanel.vue'
 import LiveSession from './components/LiveSession.vue'
 import BatchPanel from './components/BatchPanel.vue'
 import CapabilitiesView from './components/CapabilitiesView.vue'
+import MicLoopback from './components/MicLoopback.vue'
 import { useSettingsStore } from './stores/settings'
 import { useHealthStore } from './stores/health'
 
 const settings = useSettingsStore()
 const health = useHealthStore()
 
-type Tab = 'live' | 'batch' | 'observability'
+type Tab = 'live' | 'batch' | 'observability' | 'mictest'
 const tab = ref<Tab>('live')
 
 health.start(settings.token)
@@ -23,17 +24,19 @@ onUnmounted(() => health.stop())
     <h1>Speech Bridge</h1>
     <p class="subtitle">Local real-time speech-to-speech translation</p>
 
-    <SetupPanel />
+    <SetupPanel v-if="tab !== 'mictest'" />
 
     <nav class="tabs">
       <button :class="{ active: tab === 'live' }" @click="tab = 'live'">Live session</button>
       <button :class="{ active: tab === 'batch' }" @click="tab = 'batch'">Batch</button>
       <button :class="{ active: tab === 'observability' }" @click="tab = 'observability'">Observability</button>
+      <button :class="{ active: tab === 'mictest' }" @click="tab = 'mictest'">Mic test</button>
     </nav>
 
     <LiveSession v-show="tab === 'live'" />
     <BatchPanel v-if="tab === 'batch'" />
     <CapabilitiesView v-if="tab === 'observability'" />
+    <MicLoopback v-if="tab === 'mictest'" />
   </div>
 </template>
 
