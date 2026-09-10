@@ -50,6 +50,13 @@ One inference at a time per context — the Go layer serializes with a per-conte
 gate. A returned C buffer is valid only until the next call on that context and
 is copied out immediately on the Go side.
 
+## Repository & module
+
+One Go module rooted at the repo (`github.com/cgouz/speech-bridge`): `app/` is
+the server, `web/` the embedded UI, `clients/go/` the SDK. `third_party/` holds
+the vendored engines and is excluded from Go builds (`go` commands target
+`./app/... ./web/... ./clients/...`).
+
 ## Go application
 
 - `internal/core` — cgo `dlopen` loaders, one file per core, typed C shims
