@@ -34,7 +34,7 @@ doctor: ## verify toolchain + vendored trees
 
 .PHONY: test
 test: ## unit tests only — no models, no native libs
-	@go test ./app/... ./web/...
+	@go test ./app/... ./web/... ./clients/...
 
 .PHONY: test-e2e
 test-e2e: ## end-to-end tests — needs models, skips cleanly if absent
@@ -45,7 +45,7 @@ check: ## build cores -> check-symbols -> smoke test -> go vet -> go test
 	@scripts/build.sh --cores-only $(if $(JOBS),-j $(JOBS),)
 	@scripts/check-symbols.sh
 	@if [[ -x build/smoke/sb_smoke ]]; then build/smoke/sb_smoke; else echo "smoke test: milestone 2"; fi
-	@go vet ./app/... ./web/... && go test ./app/... ./web/...
+	@go vet ./app/... ./web/... ./clients/... && go test ./app/... ./web/... ./clients/...
 
 .PHONY: run
 run: app ## run sb-server with the current environment
