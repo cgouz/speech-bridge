@@ -11,65 +11,84 @@ PyTorch, no CUDA toolkit. CPU-first; Metal on Apple Silicon.
 **Platforms (both first-class):** Linux x86_64, macOS arm64.
 cgo forbids cross-compilation — build natively on each.
 
-## Engines (vendored, read-only, in `third_party/`)
+## How it works
 
-| core               | engine            | role |
-|--------------------|-------------------|------|
-| `libsb_stt`        | parakeet.cpp      | streaming STT (uz/ru/kaa), emits end-of-utterance events |
-| `libsb_mt`         | llama.cpp         | MT — MADLAD-400 3B (T5), `<2xx> text`, 512-token ctx |
-| `libsb_tts_magpie` | magpie-tts.cpp    | TTS for en/de/es/fr/it/pt-BR/hi/ko/vi/ar |
-| `libsb_tts_vits`   | sherpa-onnx       | TTS (MMS-TTS/VITS) for uz/ru/kaa |
+```
+mic / WAV ─► STT (parakeet) ─► sentence split ─► MT (MADLAD) ─► TTS ─► PCM out
+             streaming           (pure Go)        per sentence    magpie │ vits
+             partial + EOU                                        by target lang
+```
 
-Each core is a **self-contained shared library** that statically links its own
-engine and its own ggml — the three ggml copies are mutually incompatible and
-must never share a link unit. See `ARCHITECTURE.md` and `third_party/PINNED.md`.
+One process `dlopen`s four self-contained shared libraries and runs the whole
+pipeline in-memory — no HTTP between stages. Each core statically links its own
+engine **and its own ggml** (the three ggml copies are mutually incompatible
+and must never share a link unit). See `ARCHITECTURE.md`, `third_party/PINNED.md`.
+
+| core               | engine        | role | script |
+|--------------------|---------------|------|--------|
+| `libsb_stt`        | parakeet.cpp  | streaming STT (uz/ru/kaa), end-of-utterance events | — |
+| `libsb_mt`         | llama.cpp     | MT — MADLAD-400 3B (T5), `<2xx> text`, 512-token ctx | — |
+| `libsb_tts_magpie` | magpie-tts.cpp| TTS for en/de/es/fr/it/pt-BR/hi/ko/vi/ar | Latin |
+| `libsb_tts_vits`   | sherpa-onnx   | TTS (MMS/VITS) for uz/ru/kaa | Cyrillic |
 
 ## Build
 
-### Prerequisites
-- CMake ≥ 3.20, a C++17 compiler
-- Go ≥ 1.22
-- GNU Make, bash
-- Linux: gcc ≥ 12 or clang ≥ 15
-- macOS: Xcode Command Line Tools (full Xcode for `--metal`)
-
-Run `make doctor` to check.
+Prereqs: CMake ≥ 3.20, a C++17 compiler, Go ≥ 1.23, GNU Make, bash.
+Run `make doctor` to check the environment.
 
 ### Linux x86_64
 ```sh
+sudo apt install build-essential cmake golang         # gcc ≥ 12
 make doctor
-make cores          # -> lib/libsb_*.so   (portable AVX2+FMA baseline on --release)
-make app            # -> app/sb-server
-make check-symbols  # every lib exports only sb_*
+./scripts/build.sh                                    # cores + symbol check + smoke + go build
+#   -> lib/libsb_*.so   (release builds pin AVX2+FMA, no -march=native)
+#   -> app/sb-server
 ```
 
 ### macOS arm64
 ```sh
+xcode-select --install
+brew install cmake go
 make doctor
-make cores          # -> lib/libsb_*.dylib   (add: scripts/build.sh --metal, needs full Xcode)
-make app            # -> app/sb-server
-make check-symbols
+./scripts/build.sh                                    # CPU-first
+./scripts/build.sh --metal                            # + Metal ggml backend (needs full Xcode)
+#   -> lib/libsb_*.dylib
+#   -> app/sb-server
 ```
 
-### Models
+### Models (~3.5 GB, architecture-independent)
 ```sh
-make fetch-models   # downloads the q4_k set (~3.4 GB) + Russian VITS, sha256-verified
+make fetch-models                                     # sha256-verified against models/MANIFEST.md
 ```
-Fetched into `models/{stt,mt,tts_magpie,tts_vits}/`. Uzbek/Karakalpak VITS
-voices need a one-off offline export — see `models/MANIFEST.md` and
-`docs/blockers.md` #6.
+Uzbek/Karakalpak VITS voices need a one-off offline export — see
+`models/MANIFEST.md` and `docs/blockers.md` #6.
 
 ## Run
 ```sh
-make run                     # starts sb-server (default 127.0.0.1:8080)
-# GET /            web test UI (mic -> captions + audio)
-# GET /health /ready /metrics /v1/capabilities
-# POST /v1/speech-to-speech  (multipart WAV)
-# WS  /v1/stream              live speech -> captions + translated voice
+make run                                              # SB_BIND defaults to 127.0.0.1:8080
+```
+- `GET  /`                     web test UI (mic → live captions + translated voice)
+- `GET  /health /ready /metrics /v1/capabilities`
+- `POST /v1/speech-to-speech`  multipart WAV → transcript + translation + audio
+- `POST /v1/transcribe /v1/translate /v1/speak`
+- `WS   /v1/stream`            live speech → ordered partial/transcript/translation/audio
+
+Full contract: `docs/api.md`. Deploy: `docs/operations.md`.
+
+## Test
+
+```sh
+make test        # unit tests — no models, no native libs
+make check       # build cores → check-symbols → one-process dlopen smoke test → go vet → go test
+make test-e2e    # real cores + real models (skips cleanly if models absent)
+make bench       # latency budget against a running server
 ```
 
 ## Status
 
-Milestone 1 complete: engines vendored (`third_party/PINNED.md`), repo skeleton,
-`libsb_stt` builds against vendored parakeet.cpp and passes `make check-symbols`.
-Remaining milestones tracked in the mission spec. Deviations: `docs/blockers.md`.
+Milestones 1–8 implemented. Verified on macOS arm64 (CPU-only, 8 GB): all four
+cores build with `sb_*`-only exports, the one-process smoke test passes, real
+STT transcription is clean, VITS + magpie synthesize real audio, batch and
+streaming both work end-to-end. Known gaps and deviations: `docs/blockers.md`
+(no public Uzbek STT fine-tune → base multilingual nemotron; uz/kaa VITS voices
+deferred to an offline export; Metal wired but unverified without full Xcode).

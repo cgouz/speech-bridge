@@ -28,10 +28,10 @@ else
   fail "cmake" "not found"
 fi
 
-# --- go >= 1.22 ---
+# --- go >= 1.23 ---
 if command -v go >/dev/null; then
   v="$(go version | awk '{print $3}' | sed 's/go//')"
-  if [[ "$(printf '%s\n1.22.0\n' "$v" | sort -V | head -1)" == "1.22.0" ]]; then say "go" "$v"; else fail "go" "$v < 1.22"; fi
+  if [[ "$(printf '%s\n1.23.0\n' "$v" | sort -V | head -1)" == "1.23.0" ]]; then say "go" "$v"; else fail "go" "$v < 1.23"; fi
 else
   fail "go" "not found"
 fi
