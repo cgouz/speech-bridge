@@ -16,6 +16,10 @@ help: ## show this help
 cores: ## build the four isolated core libs into lib/
 	@scripts/build.sh --cores-only $(if $(JOBS),-j $(JOBS),)
 
+.PHONY: web
+web: ## build the Vue frontend into web/dist/ (needs node/npm)
+	@cd web/frontend && npm ci && npm run build
+
 .PHONY: app
 app: ## go build sb-server (needs cores in lib/)
 	@scripts/build.sh --app-only $(if $(JOBS),-j $(JOBS),)

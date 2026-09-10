@@ -133,6 +133,19 @@ if [[ "$CORES_ONLY" == "1" ]]; then
   exit 0
 fi
 
+# --- frontend ------------------------------------------------------------
+# Rebuilds web/dist/ from web/frontend/ when node is available. Never fatal:
+# web/dist/ is committed (go:embed needs it to exist at compile time), so a
+# node-less host just ships whatever dist/ is already checked in.
+if [[ "$DO_APP" == "1" && -f "$ROOT/web/frontend/package.json" ]]; then
+  if command -v npm >/dev/null 2>&1; then
+    echo "==> web: npm ci && npm run build"
+    ( cd "$ROOT/web/frontend" && npm ci && npm run build )
+  else
+    echo "==> web: skipped (npm not found) — using committed web/dist/"
+  fi
+fi
+
 # --- app ---------------------------------------------------------------
 if [[ "$DO_APP" == "1" ]]; then
   if [[ -f "$ROOT/go.mod" ]]; then

@@ -4,8 +4,15 @@ HTTP + WebSocket surface of `sb-server`. This document tracks the implemented
 behavior.
 
 Base URL defaults to `http://127.0.0.1:8080` (`SB_BIND`). When `SB_AUTH_TOKEN`
-is set, every `/v1/*` endpoint (including `/v1/stream`) requires
-`Authorization: Bearer <token>`. `/health`, `/ready`, `/metrics` are always open.
+is set, every `/v1/*` endpoint except `/v1/capabilities` requires
+`Authorization: Bearer <token>`. `/health`, `/ready`, `/metrics` and
+`/v1/capabilities` are always open (capabilities is read before a client has a
+token, to populate a setup UI).
+
+`/v1/stream` also accepts the token as an `access_token` query parameter
+(`wss://host/v1/stream?access_token=<token>`), since browsers cannot set a
+custom header on a WebSocket handshake. The `Authorization` header still works
+too (e.g. for non-browser clients) and is checked first.
 
 Every response carries an `X-Request-ID` header; it also appears as
 `request_id` in JSON bodies and in the error shape.

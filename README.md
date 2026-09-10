@@ -63,11 +63,21 @@ make fetch-models                                     # sha256-verified against 
 Uzbek/Karakalpak VITS voices need a one-off offline export — see
 `models/MANIFEST.md` and `docs/blockers.md` #6.
 
+### Frontend (Vue 3 + Vite + TypeScript, build-time only)
+```sh
+make web                                              # web/frontend -> web/dist/, embedded via go:embed
+```
+Node is a **build-time-only** dependency — the shipped binary embeds the built
+assets and needs no Node at runtime. `./scripts/build.sh` runs this
+automatically when `npm` is on `PATH`; otherwise it skips with a message and
+the previously-committed `web/dist/` (tracked in git for exactly this reason)
+is embedded as-is. See `web/frontend/README.md`.
+
 ## Run
 ```sh
 make run                                              # SB_BIND defaults to 127.0.0.1:8080
 ```
-- `GET  /`                     web test UI (mic → live captions + translated voice)
+- `GET  /`                     Vue frontend (setup, live session, batch panel, observability)
 - `GET  /health /ready /metrics /v1/capabilities`
 - `POST /v1/speech-to-speech`  multipart WAV → transcript + translation + audio
 - `POST /v1/transcribe /v1/translate /v1/speak`

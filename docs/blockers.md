@@ -177,3 +177,87 @@ library for `/v1/stream` — a single, zero-dependency module) declares
 `go 1.23`, which propagates to `go.mod`. 1.23 (Aug 2024) is the effective
 minimum. `doctor.sh` checks for it. Hand-rolling RFC 6455 to shave one minor
 version was judged not worth the framing/masking-bug risk.
+
+---
+
+## 10. Browser WebSocket clients cannot authenticate `/v1/stream` via header
+
+**Status:** resolved — query-param fallback added, milestone 9 (Vue frontend).
+
+`/v1/stream` was gated by the same `Authorization: Bearer` middleware as the
+batch REST routes. The `Authorization` header cannot be set on a browser
+`WebSocket` handshake (the API gives no hook for custom headers), so with
+`SB_AUTH_TOKEN` set, the shipped Vue frontend's live session had no way to
+authenticate the stream at all.
+
+**Resolution:** `app/internal/httpapi/server.go` adds `authWS`, used only for
+`GET /v1/stream`: it checks the `Authorization` header first (unchanged for
+non-browser clients, e.g. `clients/go`) and falls back to an `access_token`
+query parameter. Every other `/v1/*` route is untouched — still header-only.
+Documented in `docs/api.md`. The frontend's WS client
+(`web/frontend/src/api/stream.ts`) sends the token this way.
+
+Also corrected `docs/api.md`: `GET /v1/capabilities` was documented as
+requiring auth but has never actually enforced it in `server.go` (it's grouped
+with `/health`/`/ready`/`/metrics` as always-open, deliberately, so a
+not-yet-authenticated UI can populate its setup screen). Docs now match code.
+
+---
+
+## 11. `libsb_tts_vits.so` crashed loading any VITS model on Linux x86_64
+
+**Status:** resolved.
+
+`sb_tts_model_load()` (and therefore `/ready`, since all cores load eagerly at
+startup) crashed the whole process on this platform: `free(): invalid
+pointer` / `SIGABRT`, raised from inside a `std::regex` construction, called
+from `onnxruntime::DeviceDiscovery::DiscoverDevicesForPlatform()`, called
+unconditionally from `Environment::Initialize()` the first time any
+`OrtEnv` is created (`SherpaOnnxCreateOfflineTts` → `OrtApis::CreateEnv`).
+Reproduced standalone with a 20-line `dlopen` harness under `gdb` — the crash
+is entirely inside the vendored/prebuilt `onnxruntime` static archive, before
+any of our wrapper code (`cores/tts_vits/sb_tts_vits.cpp`) runs, so nothing at
+that layer could catch or route around it.
+
+`DeviceDiscovery` is a relatively new (~onnxruntime 1.20+) automatic
+execution-provider/hardware enumeration feature. It has multiple open upstream
+reports of the same crash signature on other platforms (ARM64 Jetson —
+microsoft/onnxruntime#28301 — and RK3588/simple-framebuffer VMs —
+microsoft/onnxruntime#26763) that a maintainer PR (#28344) partially
+addressed; our case reproduces on a plain Intel x86_64 host with a normal
+`vendor_id`, so it isn't just the "unknown CPU vendor" variant those cover.
+
+Two things were tried:
+
+1. sherpa-onnx's vendored ggml-adjacent `SHERPA_ONNX_LINK_LIBSTDCPP_STATICALLY`
+   defaults `ON` on Linux, statically linking a second libstdc++ into our
+   otherwise-dynamically-linked `sb_tts_vits.so` — a real (if different)
+   footgun. Turned off via that upstream CMake option in
+   `cores/tts_vits/CMakeLists.txt` (no vendored source touched). Verified this
+   alone does **not** fix the crash — kept anyway since it removes a
+   plausible second source of heap-allocator confusion and matches how every
+   other core links libstdc++.
+2. **The actual fix:** `third_party/sherpa-onnx/cmake/onnxruntime-linux-x86_64-static.cmake`
+   hardcodes onnxruntime 1.27.1 (URL + sha256, both literal). Since that file
+   can't be edited, `cores/tts_vits/CMakeLists.txt` now fetches onnxruntime
+   **1.18.1** itself (sha256-verified, same discipline as
+   `scripts/fetch-models.sh`) — confirmed by symbol inspection to predate
+   `DeviceDiscovery` entirely — into the build tree, and points CMake's own
+   `FETCHCONTENT_SOURCE_DIR_ONNXRUNTIME` override at it. That variable is
+   FetchContent's built-in mechanism for a parent project to replace a named
+   dependency's source wholesale; when set, the vendored
+   `FetchContent_Declare(onnxruntime URL ... HASH ...)` call's own URL/hash is
+   never consulted for that dependency. Gated to
+   `CMAKE_SYSTEM_NAME STREQUAL Linux AND CMAKE_SYSTEM_PROCESSOR STREQUAL
+   x86_64` so it cannot affect the macOS arm64 build (which uses a different
+   sherpa-onnx cmake file for its own onnxruntime fetch, verified working in
+   milestone 8).
+
+Verified: the standalone `dlopen` repro now loads real VITS voice
+directories successfully; `make test-e2e` passes end-to-end
+(`POST /v1/speech-to-speech`, `en → ru`, produces real synthesized audio);
+`/ready` reports `tts_vits: "ok"`.
+
+If sherpa-onnx's vendored pin ever moves past a fixed onnxruntime release,
+re-check whether this override is still needed — drop it if so, rather than
+carrying a stale downgrade forward.

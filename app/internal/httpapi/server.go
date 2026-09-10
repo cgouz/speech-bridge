@@ -62,13 +62,12 @@ func New(d Deps) *Server {
 	// Streaming WebSocket (authed in the handler; not queued). GET — the
 	// upgrade request is a GET.
 	if d.Stream != nil {
-		mux.Handle("GET /v1/stream", s.auth(d.Stream))
+		mux.Handle("GET /v1/stream", s.authWS(d.Stream))
 	}
 
-	// Web UI — exact root plus any other static path.
+	// Web UI (SPA) — catch-all; more specific patterns above always win.
 	if d.WebFS != nil {
-		mux.Handle("GET /{$}", d.WebFS)
-		mux.Handle("GET /index.html", d.WebFS)
+		mux.Handle("GET /", d.WebFS)
 	}
 
 	s.http = &http.Server{
@@ -134,6 +133,27 @@ func (s *Server) auth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if token != "" {
 			got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+			if got != token {
+				writeError(w, http.StatusUnauthorized, "unauthorized", "missing or invalid bearer token", "", ridOf(r))
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// authWS is like auth but also accepts the token as an `access_token` query
+// parameter. Browsers cannot set an Authorization header on a WebSocket
+// handshake, so /v1/stream needs this fallback for browser clients; every
+// other /v1/* route stays header-only.
+func (s *Server) authWS(next http.Handler) http.Handler {
+	token := s.deps.Config.AuthToken
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if token != "" {
+			got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+			if got != token {
+				got = r.URL.Query().Get("access_token")
+			}
 			if got != token {
 				writeError(w, http.StatusUnauthorized, "unauthorized", "missing or invalid bearer token", "", ridOf(r))
 				return

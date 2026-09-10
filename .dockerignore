@@ -1,0 +1,13 @@
+# Keep the Docker build context (and the container image) free of host build
+# outputs — CMakeCache.txt embeds absolute paths and refuses to be reused from
+# a different directory inside the container.
+/build/
+/lib/
+/app/sb-server
+
+# Models are mounted at runtime via a volume, never baked into the image.
+/models/*
+!/models/MANIFEST.md
+
+/web/frontend/node_modules/
+/.git/

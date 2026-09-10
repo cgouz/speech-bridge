@@ -100,3 +100,19 @@ memory-constrained host; the budget assumes Metal for STT+MT on Apple Silicon
 after `./scripts/build.sh --metal` on a full-Xcode machine and record the
 numbers here.
 
+Linux x86_64, **CPU-only** (release build, AVX2+FMA, no `--metal`), 16-core /
+31 GB host, all four cores loaded, 7.4 s English fixture clip → Russian:
+
+| metric | measured | budget |
+|--------|---------:|-------:|
+| batch end-to-end | ~5.9 s | < 11 s (7 s clip) ✓ |
+| EOU → translation | ~1.8 s | < 2 s ✓ |
+| EOU → first audio | ~2.9 s | < 4 s ✓ |
+| STT partial lag | ~0.8 s | < 300 ms |
+| batch stages | stt 1.8 s / mt 2.5 s / tts 1.7 s | — |
+
+More CPU cores and RAM than the macOS reference host close most of the gap:
+batch end-to-end and EOU→audio both clear budget here (they missed it on
+macOS CPU-only). STT partial lag still misses the 300 ms budget — that number
+assumes Metal-accelerated STT, which this CPU-only run doesn't have.
+
