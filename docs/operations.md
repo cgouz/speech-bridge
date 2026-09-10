@@ -80,3 +80,23 @@ SB_BENCH_WAV=clip.wav SB_BENCH_SRC=ru SB_BENCH_DST=uz make bench
 Prints per-stage latency and checks it against the budget (STT partial < 300 ms,
 EOU → translation < 2 s, EOU → first audio < 4 s, batch 10 s clip < 15 s on
 4 CPU cores). CPU-only numbers; Apple-Silicon `--metal` builds are faster.
+
+### Reference numbers
+
+macOS arm64, **CPU-only** (no Metal), 8 GB RAM, all four cores loaded,
+7.4 s English fixture clip → Russian:
+
+| metric | measured | budget |
+|--------|---------:|-------:|
+| batch end-to-end | ~13 s | < 15 s (10 s clip) |
+| EOU → translation | ~1.2 s | < 2 s ✓ |
+| EOU → first audio | ~4.7 s | < 4 s |
+| STT partial lag | ~1.0 s | < 300 ms |
+| batch stages | stt 6 s / mt 4 s / tts 3 s | — |
+
+STT partial lag and EOU→audio miss the budget on this CPU-only,
+memory-constrained host; the budget assumes Metal for STT+MT on Apple Silicon
+(mission: "macOS/Metal STT+MT expected notably faster"). Re-run `make bench`
+after `./scripts/build.sh --metal` on a full-Xcode machine and record the
+numbers here.
+

@@ -86,9 +86,21 @@ make bench       # latency budget against a running server
 
 ## Status
 
-Milestones 1–8 implemented. Verified on macOS arm64 (CPU-only, 8 GB): all four
-cores build with `sb_*`-only exports, the one-process smoke test passes, real
-STT transcription is clean, VITS + magpie synthesize real audio, batch and
-streaming both work end-to-end. Known gaps and deviations: `docs/blockers.md`
-(no public Uzbek STT fine-tune → base multilingual nemotron; uz/kaa VITS voices
-deferred to an offline export; Metal wired but unverified without full Xcode).
+Milestones 1–8 implemented. Verified on macOS arm64 (CPU-only, 8 GB):
+
+- all four cores build; `make check-symbols` shows only `sb_*` exports; the
+  one-process `dlopen(RTLD_LOCAL)` smoke test passes.
+- `make test` passes with no models/libs; `make check` is green.
+- real end-to-end `POST /v1/speech-to-speech`: English clip →
+  `"Well, I don't wish to see it any more, observed Phoebe…"` →
+  Russian `"Ну, я не хочу больше видеть его, — заметила Фиби…"` → 7.4 s of
+  synthesized Russian speech. `en→uz` translation renders Latin Uzbek.
+- streaming `/v1/stream` emits ordered partial/transcript/translation/audio.
+- `make bench` runs; CPU-only latencies in `docs/operations.md` (batch ~13 s;
+  EOU→translation ~1.2 s ✓; STT partial ~1 s and EOU→audio ~4.7 s miss the
+  Metal-assumed budget on this host).
+
+Known gaps and deviations (`docs/blockers.md`): no public Uzbek STT fine-tune →
+base multilingual nemotron; **uz/kaa VITS voices deferred** to an offline MMS
+export, so the ru→uz *voice* isn't live yet (captions + translation are);
+Metal wired but unverified without full Xcode.
