@@ -135,14 +135,17 @@ fi
 
 # --- app ---------------------------------------------------------------
 if [[ "$DO_APP" == "1" ]]; then
-  if [[ -f "$ROOT/app/go.mod" ]]; then
+  if [[ -f "$ROOT/go.mod" ]]; then
     echo "==> go build ./app/cmd/sb-server"
     GO_FLAGS=()
     [[ "$DEBUG_GO" == "1" ]] && GO_FLAGS=(-gcflags "all=-N -l")
-    ( cd "$ROOT/app" && CGO_ENABLED=1 go build ${GO_FLAGS[@]+"${GO_FLAGS[@]}"} -o "$ROOT/app/sb-server" ./cmd/sb-server )
+    VERSION="$(cat "$ROOT/VERSION" 2>/dev/null || echo dev)"
+    ( cd "$ROOT" && CGO_ENABLED=1 go build ${GO_FLAGS[@]+"${GO_FLAGS[@]}"} \
+        -ldflags "-X main.version=$VERSION" \
+        -o "$ROOT/app/sb-server" ./app/cmd/sb-server )
     echo "    -> $ROOT/app/sb-server"
   else
-    echo "==> app: skipped (app/go.mod not present yet)"
+    echo "==> app: skipped (go.mod not present)"
   fi
 fi
 

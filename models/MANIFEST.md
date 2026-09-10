@@ -27,7 +27,7 @@ Fields, tab-separated: `file` · `dest` (path relative to `$SB_MODELS_DIR`) ·
 <!-- SB-MANIFEST-BEGIN -->
 ```
 file	stt/nemotron-3.5-asr-streaming-0.6b-q4_k.gguf	5ad85eb3f3014c1a300d67b7ccbd23c38c4c952405cbe33a861e19fb2775e84b	718102624	https://huggingface.co/mudler/parakeet-cpp-gguf/resolve/main/nemotron-3.5-asr-streaming-0.6b-q4_k.gguf
-file	mt/madlad400-3b-mt-q4_k.gguf	2c855ceb7cda790aa217bc760a73d07b5aa156b33dbd6a96a7b15a3501bf41c2	2036588352	https://huggingface.co/cstr/madlad400-3b-mt-GGUF/resolve/main/madlad400-3b-mt-q4_k.gguf
+file	mt/madlad400-3b-mt-q4_k_m.gguf	fc56f16d215db71e856de3c3770974c867e3d95a782d415d4cfabc9fb470b8e4	1858124864	https://huggingface.co/mtsdurica/madlad400-3b-mt-Q4_K_M-GGUF/resolve/main/madlad400-3b-mt-q4_k_m.gguf
 file	tts_magpie/magpie-tts-multilingual-357m-q4_k.gguf	af852e23862be7def7becfbe38df75e6a23e4b9af27a73d1d63431614a9d2fd4	540839648	https://huggingface.co/mudler/magpie-tts.cpp-gguf/resolve/main/magpie-tts-multilingual-357m-q4_k.gguf
 file	tts_vits/vits-mms-rus/model.onnx	8735fad753674ec67c084ef78dc7d3fa47aacceb12e7518d05e0e11db1ed34dd	114021556	https://huggingface.co/csukuangfj/vits-mms-rus/resolve/main/model.onnx
 file	tts_vits/vits-mms-rus/tokens.txt	361fb8874d234fee4893091334ffcdd10a30367dc7bee725d5f771eeb44ed23b	447	https://huggingface.co/csukuangfj/vits-mms-rus/resolve/main/tokens.txt

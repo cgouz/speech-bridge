@@ -29,3 +29,8 @@
 *~
 .idea/
 .vscode/
+
+# stray `go build ./app/cmd/X` outputs land in the repo root
+/gguf-kv
+/sb-bench
+/sb-server
