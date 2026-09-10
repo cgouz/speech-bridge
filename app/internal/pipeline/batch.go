@@ -118,6 +118,20 @@ func (p *Pipeline) Batch(in BatchInput) (*BatchResult, error) {
 	return res, nil
 }
 
+// Transcribe runs only STT over a finished clip (no MT/TTS). Used by
+// POST /v1/transcribe.
+func (p *Pipeline) Transcribe(audio []float32, sampleRate int, srcLang string) (string, int64, error) {
+	if p.eng.STT == nil {
+		return "", 0, ErrNoSTT
+	}
+	if srcLang == "" {
+		srcLang = "auto"
+	}
+	start := time.Now()
+	t, err := p.transcribe(audio, sampleRate, srcLang)
+	return t, ms(start), err
+}
+
 // transcribe feeds the whole clip through the streaming STT and concatenates
 // the finalized utterances.
 func (p *Pipeline) transcribe(audio []float32, sampleRate int, srcLang string) (string, error) {

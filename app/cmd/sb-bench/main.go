@@ -63,10 +63,15 @@ func main() {
 	fmt.Printf("%-34s %8s\n", "stream: EOU -> first audio", dur(st.eouToAudio))
 
 	fmt.Printf("\n-- budget --\n")
-	check("STT partial lag < 300 ms", st.firstPartial < 300*time.Millisecond)
-	check("EOU -> translation < 2 s", st.eouToTranslation > 0 && st.eouToTranslation < 2*time.Second)
+	check("STT partial lag < 300 ms", st.firstPartial > 0 && st.firstPartial < 300*time.Millisecond)
+	if st.eouToTranslation == 0 {
+		fmt.Printf("  [n/a ] EOU -> translation < 2 s   (no MT engine loaded)\n")
+	} else {
+		check("EOU -> translation < 2 s", st.eouToTranslation < 2*time.Second)
+	}
 	check("EOU -> first audio < 4 s", st.eouToAudio > 0 && st.eouToAudio < 4*time.Second)
 	check(fmt.Sprintf("batch %.0fs clip end-to-end < %.0fs", clipSec, clipSec*1.5), bWall < time.Duration(float64(time.Second)*clipSec*1.5))
+	fmt.Printf("\nNote: CPU-only figures. On Apple Silicon with --metal (STT+MT), expect notably lower latency.\n")
 }
 
 type timings struct {

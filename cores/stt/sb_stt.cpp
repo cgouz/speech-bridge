@@ -9,6 +9,7 @@
  */
 #include "sb_stt.h"
 
+#include <cctype>
 #include <climits>
 #include <cstdint>
 #include <cstdlib>
@@ -59,15 +60,49 @@ static void stream_capture_error(sb_stt_stream *s, const char *fallback) {
     s->last_error = (e && *e) ? e : fallback;
 }
 
+// Strip prompt/segment tags the nemotron streaming model can emit inline, e.g.
+// "<en-US>", "<ru>", "<EOU>", "<EOB>" — parakeet strips <EOU>/<EOB> from feed()
+// text but the locale tag can leak. Collapses any resulting double spaces.
+static void strip_tags(std::string &t) {
+    std::string out;
+    out.reserve(t.size());
+    for (size_t i = 0; i < t.size();) {
+        if (t[i] == '<') {
+            size_t close = t.find('>', i);
+            if (close != std::string::npos && close - i <= 8) {
+                bool tagish = true;
+                for (size_t k = i + 1; k < close; ++k) {
+                    char c = t[k];
+                    if (!(std::isalnum((unsigned char)c) || c == '-' || c == '_')) { tagish = false; break; }
+                }
+                if (tagish) { i = close + 1; continue; }
+            }
+        }
+        out.push_back(t[i]);
+        ++i;
+    }
+    // squeeze spaces and trim
+    std::string sq;
+    bool prev_sp = false;
+    for (char c : out) {
+        bool sp = (c == ' ' || c == '\t');
+        if (sp && prev_sp) continue;
+        sq.push_back(c);
+        prev_sp = sp;
+    }
+    size_t a = sq.find_first_not_of(' ');
+    size_t b = sq.find_last_not_of(' ');
+    t = (a == std::string::npos) ? "" : sq.substr(a, b - a + 1);
+}
+
 // Consume parakeet's freshly finalized text + EOU/EOB events for this feed and
-// turn them into queued sb_stt events.
+// turn them into queued sb_stt events. parakeet's stream_feed returns text that
+// already carries its own spacing — append verbatim, do not insert separators.
 static void ingest(sb_stt_stream *s, char *new_text, long ms_at_feed_start) {
     const bool have_text = new_text && new_text[0] != '\0';
     if (have_text) {
         if (s->utt_text.empty()) {
             s->utt_start_ms = ms_at_feed_start;
-        } else if (s->utt_text.back() != ' ' && new_text[0] != ' ') {
-            s->utt_text.push_back(' ');
         }
         s->utt_text += new_text;
     }
@@ -87,13 +122,17 @@ static void ingest(sb_stt_stream *s, char *new_text, long ms_at_feed_start) {
 
     if (eou_end_ms >= 0) {
         if (s->utt_start_ms < 0) s->utt_start_ms = ms_at_feed_start;
-        s->queue.push_back(QEvent{SB_STT_FINAL_EOU, s->utt_text,
+        std::string clean = s->utt_text;
+        strip_tags(clean);
+        s->queue.push_back(QEvent{SB_STT_FINAL_EOU, clean,
                                   s->utt_start_ms,
                                   eou_end_ms > 0 ? eou_end_ms : cur_ms});
         s->utt_text.clear();
         s->utt_start_ms = -1;
     } else if (have_text) {
-        s->queue.push_back(QEvent{SB_STT_PARTIAL, s->utt_text,
+        std::string clean = s->utt_text;
+        strip_tags(clean);
+        s->queue.push_back(QEvent{SB_STT_PARTIAL, clean,
                                   s->utt_start_ms, cur_ms});
     }
 }
@@ -223,9 +262,13 @@ SB_API sb_status sb_stt_finish(sb_stt_stream *s) {
         parakeet_capi_free_string(txt);
         // Close any residual in-progress utterance the tail did not EOU.
         if (!s->utt_text.empty()) {
-            s->queue.push_back(QEvent{SB_STT_FINAL_EOU, s->utt_text,
-                                      s->utt_start_ms < 0 ? 0 : s->utt_start_ms,
-                                      ms_now});
+            std::string clean = s->utt_text;
+            strip_tags(clean);
+            if (!clean.empty()) {
+                s->queue.push_back(QEvent{SB_STT_FINAL_EOU, clean,
+                                          s->utt_start_ms < 0 ? 0 : s->utt_start_ms,
+                                          ms_now});
+            }
             s->utt_text.clear();
             s->utt_start_ms = -1;
         }

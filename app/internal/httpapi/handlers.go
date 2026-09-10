@@ -140,17 +140,16 @@ func (s *Server) handleTranscribe(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "stt_unavailable", "speech-to-text engine not loaded", "stt", rid)
 		return
 	}
-	res, err := s.deps.Pipeline.Batch(pipeline.BatchInput{
-		Audio: audio.Samples, SampleRate: audio.SampleRate,
-		SourceLang: srcLang, TargetLang: "en", // dst unused; TTS/ MT skipped below
-	})
-	// We only want the transcript; ignore translation/audio.
+	transcript, sttMs, err := s.deps.Pipeline.Transcribe(audio.Samples, audio.SampleRate, srcLang)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "pipeline_error", err.Error(), "", rid)
+		writeError(w, http.StatusInternalServerError, "stt_error", err.Error(), "stt", rid)
 		return
 	}
+	s.deps.Metrics.Observe("stt", float64(sttMs)/1000)
+	s.deps.Metrics.CounterAdd("sb_audio_seconds_total", nil, audio.DurationS)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"request_id": rid, "transcript": res.Transcript, "timings": res.Timings,
+		"request_id": rid, "transcript": transcript,
+		"timings": map[string]int64{"stt_ms": sttMs, "total_ms": sttMs},
 	})
 }
 
