@@ -121,6 +121,17 @@ func (p *Pipeline) TTSForLang(dst string) bool {
 	return ok
 }
 
+// mtLang maps a display language code to the code MADLAD's "<2xx>" prompt
+// expects (e.g. pt-BR -> pt).
+func mtLang(dst string) string {
+	switch normLang(dst) {
+	case "pt-BR":
+		return "pt"
+	default:
+		return strings.ToLower(strings.TrimSpace(dst))
+	}
+}
+
 // Translate runs one sentence through MT (gated). If MT is not loaded it
 // returns the input unchanged with ok=false so callers can run degraded.
 func (p *Pipeline) Translate(sentence, src, dst string) (out string, ok bool, err error) {
@@ -129,7 +140,7 @@ func (p *Pipeline) Translate(sentence, src, dst string) (out string, ok bool, er
 	}
 	p.mtMu.Lock()
 	defer p.mtMu.Unlock()
-	out, err = p.mtCtx.Translate(sentence, src, dst)
+	out, err = p.mtCtx.Translate(sentence, src, mtLang(dst))
 	if err != nil {
 		return "", false, err
 	}
