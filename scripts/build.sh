@@ -3,17 +3,18 @@
 #
 #   detect platform  ->  build cores via CMake (one build tree each)
 #                    ->  check exported symbols
-#                    ->  go build the app
+#                    ->  build the frontend (if node is available)
+#                    ->  build the C++ server via CMake
 #                    ->  print artifact paths
 #
-# cgo forbids practical cross-compilation: each platform builds natively.
+# Every native build (cores + server) is CMake, built natively per platform.
 #
 # Flags:
-#   --debug        CMAKE_BUILD_TYPE=Debug, go build with -gcflags "all=-N -l"
+#   --debug        CMAKE_BUILD_TYPE=Debug for cores and the server
 #   --release      CMAKE_BUILD_TYPE=Release, portable ISA baseline (see below)
 #   --clean        remove build/ and lib/ and app binaries first
 #   --cores-only   stop after cores + symbol check
-#   --app-only     skip cores, only go build
+#   --app-only     skip cores, only build the server (+ frontend)
 #   --metal        build cores' ggml with the Metal backend (needs full Xcode)
 #   -j N           parallelism (default: CPU count)
 set -euo pipefail
@@ -27,12 +28,11 @@ DO_APP=1
 DO_CLEAN=0
 CORES_ONLY=0
 METAL=0
-DEBUG_GO=0
 JOBS=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --debug)      BUILD_TYPE="Debug"; DEBUG_GO=1 ;;
+    --debug)      BUILD_TYPE="Debug" ;;
     --release)    BUILD_TYPE="Release" ;;
     --clean)      DO_CLEAN=1 ;;
     --cores-only) CORES_ONLY=1; DO_APP=0 ;;
@@ -90,8 +90,8 @@ echo "    metal      : $METAL"
 
 if [[ "$DO_CLEAN" == "1" ]]; then
   echo "==> clean"
-  rm -rf "$BUILD_DIR" "$LIB_DIR"
-  rm -f "$ROOT/app/sb-server"
+  rm -rf "$BUILD_DIR" "$LIB_DIR" "$ROOT/server/build"
+  rm -f "$ROOT/sb-server"
 fi
 
 mkdir -p "$LIB_DIR"
@@ -135,8 +135,9 @@ fi
 
 # --- frontend ------------------------------------------------------------
 # Rebuilds web/dist/ from web/frontend/ when node is available. Never fatal:
-# web/dist/ is committed (go:embed needs it to exist at compile time), so a
-# node-less host just ships whatever dist/ is already checked in.
+# web/dist/ is committed (the server serves it straight off disk — see
+# server/src/main.cpp — so a node-less host just ships whatever dist/ is
+# already checked in).
 if [[ "$DO_APP" == "1" && -f "$ROOT/web/frontend/package.json" ]]; then
   if command -v npm >/dev/null 2>&1; then
     echo "==> web: npm ci && npm run build"
@@ -146,24 +147,17 @@ if [[ "$DO_APP" == "1" && -f "$ROOT/web/frontend/package.json" ]]; then
   fi
 fi
 
-# --- app ---------------------------------------------------------------
+# --- server --------------------------------------------------------------
 if [[ "$DO_APP" == "1" ]]; then
-  if [[ -f "$ROOT/go.mod" ]]; then
-    echo "==> go build ./app/cmd/sb-server"
-    GO_FLAGS=()
-    [[ "$DEBUG_GO" == "1" ]] && GO_FLAGS=(-gcflags "all=-N -l")
-    VERSION="$(cat "$ROOT/VERSION" 2>/dev/null || echo dev)"
-    ( cd "$ROOT" && CGO_ENABLED=1 go build ${GO_FLAGS[@]+"${GO_FLAGS[@]}"} \
-        -ldflags "-X main.version=$VERSION" \
-        -o "$ROOT/app/sb-server" ./app/cmd/sb-server )
-    echo "    -> $ROOT/app/sb-server"
-  else
-    echo "==> app: skipped (go.mod not present)"
-  fi
+  echo "==> server: cmake configure + build"
+  cmake -S "$ROOT/server" -B "$ROOT/server/build" -DCMAKE_BUILD_TYPE="$BUILD_TYPE"
+  cmake --build "$ROOT/server/build" -j "$JOBS" --target sb-server
+  cp -f "$ROOT/server/build/sb-server" "$ROOT/sb-server"
+  echo "    -> $ROOT/sb-server"
 fi
 
 echo
 echo "==> artifacts"
 ls -la "$LIB_DIR" 2>/dev/null || true
-[[ -f "$ROOT/app/sb-server" ]] && ls -la "$ROOT/app/sb-server"
+[[ -f "$ROOT/sb-server" ]] && ls -la "$ROOT/sb-server"
 echo "==> done"

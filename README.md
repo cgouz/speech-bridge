@@ -1,28 +1,30 @@
 # Speech Bridge
 
 Production-ready, fully local, real-time **speech-to-speech translation** in
-Go + C++. Live meeting interpretation (speaker in Russian → listener hears an
-Uzbek voice + live captions) and batch mode (WAV → transcript, translation,
-synthesized audio).
+**pure C/C++** (plus a TypeScript/Vue frontend, build-time only). Live meeting
+interpretation (speaker in Russian → listener hears an Uzbek voice + live
+captions) and batch mode (WAV → transcript, translation, synthesized audio).
 
 Everything runs locally: no cloud APIs, no Python at build or runtime, no
 PyTorch, no CUDA toolkit. CPU-first; Metal on Apple Silicon.
 
-**Platforms (both first-class):** Linux x86_64, macOS arm64.
-cgo forbids cross-compilation — build natively on each.
+**Platforms (both first-class):** Linux x86_64, macOS arm64. Every native
+build (cores + server) is CMake, built natively on each.
 
 ## How it works
 
 ```
 mic / WAV ─► STT (parakeet) ─► sentence split ─► MT (MADLAD) ─► TTS ─► PCM out
-             streaming           (pure Go)        per sentence    magpie │ vits
+             streaming           (pure C++)       per sentence    magpie │ vits
              partial + EOU                                        by target lang
 ```
 
 One process `dlopen`s four self-contained shared libraries and runs the whole
 pipeline in-memory — no HTTP between stages. Each core statically links its own
 engine **and its own ggml** (the three ggml copies are mutually incompatible
-and must never share a link unit). See `ARCHITECTURE.md`, `third_party/PINNED.md`.
+and must never share a link unit). The orchestrator itself (HTTP + WebSocket
+server, pipeline, everything under `server/`) is C++ on top of uWebSockets;
+see `ARCHITECTURE.md`, `third_party/PINNED.md`.
 
 | core               | engine        | role | script |
 |--------------------|---------------|------|--------|
@@ -33,27 +35,28 @@ and must never share a link unit). See `ARCHITECTURE.md`, `third_party/PINNED.md
 
 ## Build
 
-Prereqs: CMake ≥ 3.20, a C++17 compiler, Go ≥ 1.23, GNU Make, bash.
-Run `make doctor` to check the environment.
+Prereqs: CMake ≥ 3.20, a C++17 compiler, GNU Make, bash. Node.js is a
+**build-time-only** dependency for the frontend (not needed at runtime — see
+below). Run `make doctor` to check the environment.
 
 ### Linux x86_64
 ```sh
-sudo apt install build-essential cmake golang         # gcc ≥ 12
+sudo apt install build-essential cmake zlib1g-dev             # gcc ≥ 12
 make doctor
-./scripts/build.sh                                    # cores + symbol check + smoke + go build
+./scripts/build.sh                # cores + symbol check + smoke + frontend + server
 #   -> lib/libsb_*.so   (release builds pin AVX2+FMA, no -march=native)
-#   -> app/sb-server
+#   -> sb-server
 ```
 
 ### macOS arm64
 ```sh
 xcode-select --install
-brew install cmake go
+brew install cmake
 make doctor
 ./scripts/build.sh                                    # CPU-first
 ./scripts/build.sh --metal                            # + Metal ggml backend (needs full Xcode)
 #   -> lib/libsb_*.dylib
-#   -> app/sb-server
+#   -> sb-server
 ```
 
 ### Models (~3.5 GB, architecture-independent)
@@ -65,13 +68,14 @@ Uzbek/Karakalpak VITS voices need a one-off offline export — see
 
 ### Frontend (Vue 3 + Vite + TypeScript, build-time only)
 ```sh
-make web                                              # web/frontend -> web/dist/, embedded via go:embed
+make web                                              # web/frontend -> web/dist/, served from disk
 ```
-Node is a **build-time-only** dependency — the shipped binary embeds the built
-assets and needs no Node at runtime. `./scripts/build.sh` runs this
+Node is a **build-time-only** dependency — the server reads `web/dist/`
+straight off disk at startup (`SB_WEB_DIST_DIR`, defaults to `web/dist` next
+to the binary) and needs no Node at runtime. `./scripts/build.sh` runs this
 automatically when `npm` is on `PATH`; otherwise it skips with a message and
 the previously-committed `web/dist/` (tracked in git for exactly this reason)
-is embedded as-is. See `web/frontend/README.md`.
+is used as-is. See `web/frontend/README.md`.
 
 ## Run
 ```sh
@@ -88,29 +92,32 @@ Full contract: `docs/api.md`. Deploy: `docs/operations.md`.
 ## Test
 
 ```sh
-make test        # unit tests — no models, no native libs
-make check       # build cores → check-symbols → one-process dlopen smoke test → go vet → go test
-make test-e2e    # real cores + real models (skips cleanly if models absent)
-make bench       # latency budget against a running server
+make test        # unit tests (Catch2) — no models, no native libs
+make check       # build cores → check-symbols → smoke test → build server → unit tests
+make test-e2e    # real cores + real models, over the actual HTTP API (skips cleanly if models absent)
+make bench       # latency budget against a running server (scripts/bench.mjs, Node)
 ```
 
 ## Status
 
-Milestones 1–8 implemented. Verified on macOS arm64 (CPU-only, 8 GB):
+A from-scratch C++ rewrite of the original Go orchestrator (same wire
+contract throughout — `docs/api.md` never changed). Verified end-to-end on
+Linux x86_64 against real models, byte-for-byte matching output with the
+prior Go implementation on the same fixture:
 
-- all four cores build; `make check-symbols` shows only `sb_*` exports; the
-  one-process `dlopen(RTLD_LOCAL)` smoke test passes.
-- `make test` passes with no models/libs; `make check` is green.
+- all four cores build unchanged; `make check-symbols` shows only `sb_*`
+  exports; the one-process `dlopen(RTLD_LOCAL)` smoke test passes.
+- `make test` passes with no models/libs (109 assertions, ported 1:1 from the
+  former Go test suite); `make check` is green.
 - real end-to-end `POST /v1/speech-to-speech`: English clip →
   `"Well, I don't wish to see it any more, observed Phoebe…"` →
-  Russian `"Ну, я не хочу больше видеть его, — заметила Фиби…"` → 7.4 s of
-  synthesized Russian speech. `en→uz` translation renders Latin Uzbek.
-- streaming `/v1/stream` emits ordered partial/transcript/translation/audio.
-- `make bench` runs; CPU-only latencies in `docs/operations.md` (batch ~13 s;
-  EOU→translation ~1.2 s ✓; STT partial ~1 s and EOU→audio ~4.7 s miss the
-  Metal-assumed budget on this host).
+  Russian `"Ну, я не хочу больше видеть его, - заметила Фиби…"` → synthesized
+  Russian speech. `en→uz` translation renders Latin Uzbek.
+- streaming `/v1/stream` emits ordered partial/transcript/translation/audio,
+  verified with real audio in both directions.
 
-Known gaps and deviations (`docs/blockers.md`): no public Uzbek STT fine-tune →
-base multilingual nemotron; **uz/kaa VITS voices deferred** to an offline MMS
+Known gaps (`docs/blockers.md`): no public Uzbek STT fine-tune → base
+multilingual nemotron; **uz/kaa VITS voices deferred** to an offline MMS
 export, so the ru→uz *voice* isn't live yet (captions + translation are);
-Metal wired but unverified without full Xcode.
+graceful shutdown (draining in-flight requests before exit) is not yet
+implemented for the C++ server — SIGINT/SIGTERM terminate immediately.

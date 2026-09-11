@@ -261,3 +261,94 @@ directories successfully; `make test-e2e` passes end-to-end
 If sherpa-onnx's vendored pin ever moves past a fixed onnxruntime release,
 re-check whether this override is still needed — drop it if so, rather than
 carrying a stale downgrade forward.
+
+---
+
+## 12. Orchestrator rewritten Go → C++ (`pure-cpp` branch)
+
+**Status:** done. `app/` (Go), `clients/go/`, `go.mod`/`go.sum` removed. The
+four core libs and vendored engines are byte-for-byte unchanged — only the
+process that dlopens them changed language. Same wire contract throughout;
+`docs/api.md` never changed.
+
+New dependencies (`third_party/PINNED.md`): uWebSockets + uSockets (HTTP+WS),
+nlohmann/json, Catch2 (unit tests). `server/src/native/shim.c`/`shim.h` are a
+straight copy of the Go build's cgo shim — pure C already, it needed no
+porting, just an `extern "C"` fix (see below).
+
+Verified: identical transcript/translation output to the prior Go server on
+the same fixture, in both `POST /v1/speech-to-speech` and `/v1/stream`
+(real models, not fakes). `make test` (109 assertions, ported 1:1 from the Go
+suite) green.
+
+Four real bugs surfaced getting the C++ version to parity, each worth
+recording since they're easy to reintroduce:
+
+1. **`shim.h` had no `extern "C"`.** It was previously only ever included
+   from `shim.c` (compiled as C); a C++ translation unit mangles its bare
+   declarations, so `native_core.cpp` failed to link against `shim.c`'s C
+   symbols despite them existing in the same archive. Fixed by wrapping
+   `shim.h`'s own declarations in `#ifdef __cplusplus extern "C" { ... }
+   #endif` (the included ABI headers already had this; the shim's own
+   wrapper functions didn't).
+2. **`uWS::Loop::get()` is thread-local.** Session's MT→TTS work runs on a
+   detached worker thread (see `ARCHITECTURE.md`); calling `Loop::get()`
+   from that thread doesn't return the server's real event loop — it lazily
+   creates a brand-new, never-run loop local to that thread, so every
+   `defer()` onto it silently vanishes (translation/audio/done messages
+   never sent, no error). Fixed by capturing the real loop pointer once in
+   the WS `upgrade` handler (which does run on the actual server loop
+   thread) and threading it through explicitly instead of ever calling
+   `Loop::get()` off that thread.
+3. **uWS commits the response status line on the first header/body byte
+   written.** A `writeStatus()` call after that point is silently ignored —
+   the client sees "200 OK" on the wire even though the JSON body says
+   `{"error":...}`. This bit every batch handler, which wrote an eager
+   `X-Request-ID` header before knowing the final status. Fixed by
+   centralizing every response through `WriteJSON`/`WriteError` helpers
+   (`server/src/httpapi/errors.h`) that always call `writeStatus()` first;
+   no handler may call `res->writeHeader()` before the outcome is known.
+4. **Closing the WS connection right after the (now-async) `Stop()`
+   returned dropped every pending translation/audio/`done` message** — the
+   non-blocking redesign (see `ARCHITECTURE.md`'s stream.cpp note) means
+   `Stop()` can return well before in-flight sentence workers finish. The
+   close now happens only inside the `send` callback, once a `done` message
+   is actually transmitted, mirroring the Go version's
+   blocking-`Stop()`-then-`Close()` ordering without blocking the shared
+   event loop.
+
+Also fixed in passing: `obs::Logger` wrote to `std::cout` without an
+explicit flush per line, which under a redirected/piped stdout (i.e. always,
+outside an interactive terminal) can sit in the buffer indefinitely — a
+crash before the next flush would silently lose log lines. Switched to
+flushing every line (`std::endl`).
+
+**Known gaps, carried forward deliberately rather than adding unbounded
+scope:**
+
+- **Graceful shutdown is not implemented.** The Go version drained
+  in-flight requests for up to 30s on SIGINT/SIGTERM before exiting; the
+  C++ `main.cpp` has no signal handling at all, so the OS's default
+  behavior (immediate termination) applies. Safe in practice (no on-disk
+  state to corrupt; systemd's `TimeoutStopSec` would `SIGKILL` after a
+  grace period regardless), but a dropped WS session or in-flight batch
+  request gets no chance to finish. Revisit if this matters for a given
+  deployment.
+- **`gguf-kv`** (the Go GGUF metadata inspector/patcher from blocker #7)
+  was not ported — it was already "not needed for the default model set,"
+  kept only for future one-off fixes. Re-implement in C++ (or reach for
+  `llama-gguf`-style tooling from `third_party/llama.cpp` directly) if a
+  future model swap needs metadata surgery.
+- **`sb-bench` was ported to Node** (`scripts/bench.mjs`, invoked by
+  `scripts/bench.sh`) rather than C++ — it's a development-only latency
+  probe against the running server's own HTTP/WS API, not part of the
+  shipped artifact, and Node was already a build-time dependency for the
+  frontend. Reuses the WS testing pattern validated against the real
+  server during this rewrite.
+- **No C++ equivalent of the Go pipeline's in-process fake-engine unit
+  tests** (`core.FakeSTT`/`FakeMT`/`FakeTTS`, used to test batch
+  degraded-mode branching and httpapi handlers without models). `make
+  test-e2e` (`scripts/test-e2e.sh`) covers the same ground black-box, over
+  the real HTTP API with real models, but only when models are present.
+  Porting the fakes would let that logic run under plain `make test` too —
+  worth doing if `pipeline.cpp`'s branching grows more complex.

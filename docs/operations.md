@@ -6,7 +6,7 @@ Running and deploying `sb-server`.
 
 ```
 /opt/speechbridge/
-├── sb-server                 # the Go binary
+├── sb-server                 # the C++ binary
 ├── lib/                      # libsb_stt, libsb_mt, libsb_tts_magpie, libsb_tts_vits
 └── models/                   # fetched by scripts/fetch-models.sh (or a mounted volume)
     ├── stt/…gguf
@@ -41,7 +41,7 @@ docker build -f deploy/docker/Dockerfile -t speechbridge .
 docker run --rm -p 8080:8080 -v "$PWD/models:/models" speechbridge
 ```
 
-Build on an x86_64 host — cgo forbids cross-compilation.
+Build on an x86_64 host — every native component builds per-platform, no cross-compilation.
 
 ## Limits & lifecycle
 
@@ -54,15 +54,19 @@ Build on an x86_64 host — cgo forbids cross-compilation.
 | WS idle | 60 s | connection closed |
 | concurrent WS | `SB_STREAMS_MAX` (4) | 503 on connect |
 
-Graceful shutdown: SIGINT/SIGTERM → stop accepting → in-flight requests drain
-(30 s) → pipeline contexts freed → models freed → exit. The dlopen'd libraries
-are intentionally not `dlclose`d (they live for the process).
+Graceful shutdown is **not yet implemented** (see `docs/blockers.md` #12) —
+SIGINT/SIGTERM terminate the process immediately, the OS default. Safe in
+practice (no on-disk state to corrupt), but an in-flight batch request or WS
+session gets no chance to finish; systemd's `TimeoutStopSec` would `SIGKILL`
+after a grace period regardless. The dlopen'd libraries are never `dlclose`d
+either way (they live for the process).
 
 ## Observability
 
-- Logs: slog JSON on stdout with `request_id` / `session_id`, `stage`,
-  `duration_ms`. Transcript and translation text are logged **only at
-  `SB_LOG_LEVEL=debug`** — user speech is private.
+- Logs: structured JSON on stdout with `request_id` / `session_id`, `stage`,
+  `duration_ms` (`SB_LOG_FORMAT=text` for a human-readable form). Transcript
+  and translation text are logged **only at `SB_LOG_LEVEL=debug`** — user
+  speech is private.
 - Metrics: `GET /metrics` (Prometheus). Scrape it; alert on `sb_core_up == 0`
   and on `sb_stage_duration_seconds` p95.
 - Readiness: point your load balancer at `GET /ready` (503 until STT + every

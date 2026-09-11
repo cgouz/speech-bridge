@@ -18,7 +18,7 @@ MADLAD-400 emits Uzbek in **Cyrillic**. The MMS Uzbek voice
 
 - **TTS is fed Cyrillic directly** — no transliteration on the synthesis path.
 - **Captions/display for `target=uz` are transliterated to Latin** by
-  `app/internal/text` (handles o`/g`/sh/ch/ng and the hard sign).
+  `server/src/text` (handles o`/g`/sh/ch/ng and the hard sign).
 
 This keeps transliteration off the latency-critical audio path and confined to
 display text.

@@ -5,7 +5,8 @@
 # --- build outputs -----------------------------------------------------
 /build/
 /lib/
-/app/sb-server
+/sb-server
+/server/build/
 
 # --- model weights ---------------------------------------------------
 # Fetched + sha256-verified by scripts/fetch-models.sh. Multi-GB, never committed.
@@ -18,15 +19,12 @@
 *.part
 /models/.extract.*
 
-# --- Go ------------------------------------------------------------
-/app/vendor/
-*.test
-
 # --- frontend --------------------------------------------------------
-# web/dist/ is NOT ignored: it's go:embed'd by web/web.go, so a committed
-# build must exist for `go build` to work without node. `make web` /
-# scripts/build.sh regenerate it in place when node is available; commit the
-# refreshed dist/ alongside frontend source changes. See web/frontend/README.md.
+# web/dist/ is NOT ignored: sb-server serves it straight off disk (see
+# server/src/main.cpp), so a committed build must exist for a node-less host
+# to ship a working frontend. `make web` / scripts/build.sh regenerate it in
+# place when node is available; commit the refreshed dist/ alongside
+# frontend source changes. See web/frontend/README.md.
 /web/frontend/node_modules/
 
 # --- Claude Code / editors / OS ---------------------------------
@@ -36,8 +34,3 @@
 *~
 .idea/
 .vscode/
-
-# stray `go build ./app/cmd/X` outputs land in the repo root
-/gguf-kv
-/sb-bench
-/sb-server

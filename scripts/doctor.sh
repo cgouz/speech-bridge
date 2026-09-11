@@ -28,13 +28,17 @@ else
   fail "cmake" "not found"
 fi
 
-# --- go >= 1.23 ---
-if command -v go >/dev/null; then
-  v="$(go version | awk '{print $3}' | sed 's/go//')"
-  if [[ "$(printf '%s\n1.23.0\n' "$v" | sort -V | head -1)" == "1.23.0" ]]; then say "go" "$v"; else fail "go" "$v < 1.23"; fi
-else
-  fail "go" "not found"
+# --- zlib (uWebSockets' permessage-deflate needs it) ---
+if [[ "$UNAME" == "Linux x86_64" ]]; then
+  if [[ -f /usr/include/zlib.h ]] || ldconfig -p 2>/dev/null | grep -q libz.so; then
+    say "zlib" "present"
+  else
+    fail "zlib" "not found (apt install zlib1g-dev)"
+  fi
 fi
+
+# --- node (build-time only, for the frontend) ---
+if command -v node >/dev/null; then say "node" "$(node --version) (build-time only)"; else warn "node" "not found — make web will use the committed web/dist/ as-is"; fi
 
 # --- vendored trees ---
 for t in parakeet.cpp llama.cpp magpie-tts.cpp sherpa-onnx; do

@@ -51,7 +51,7 @@ file	tts_vits/vits-mms-rus/tokens.txt	361fb8874d234fee4893091334ffcdd10a30367dc7
   available.
 - **MADLAD emits Uzbek in Cyrillic.** `facebook/mms-tts-uzb-script_cyrillic`
   confirms the MMS uz voice also expects **Cyrillic** — so TTS is fed Cyrillic
-  directly; `app/internal/text` transliterates to Latin only for on-screen
+  directly; `server/src/text` transliterates to Latin only for on-screen
   captions. (See `../docs/models.md`.)
 - **magpie covers none of uz/ru/kaa** (en, de, es, fr, it, pt-BR, hi, ko, vi,
   ar + 3 Arabic variants). It is unused for the ru→uz meeting path; it serves

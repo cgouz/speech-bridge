@@ -9,6 +9,7 @@ WorkingDirectory=/opt/speechbridge
 Environment=SB_BIND=127.0.0.1:8080
 Environment=SB_LIB_DIR=/opt/speechbridge/lib
 Environment=SB_MODELS_DIR=/opt/speechbridge/models
+Environment=SB_WEB_DIST_DIR=/opt/speechbridge/web/dist
 Environment=SB_LOG_FORMAT=json
 Restart=on-failure
 RestartSec=2

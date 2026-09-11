@@ -1,5 +1,5 @@
 # Speech Bridge — orchestrator. Real work lives in scripts/build.sh.
-# cgo forbids cross-compilation: every target builds natively for `uname -sm`.
+# Every native build (cores + server) is CMake, built natively for `uname -sm`.
 
 SHELL := /usr/bin/env bash
 ROOT  := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
@@ -21,7 +21,7 @@ web: ## build the Vue frontend into web/dist/ (needs node/npm)
 	@cd web/frontend && npm ci && npm run build
 
 .PHONY: app
-app: ## go build sb-server (needs cores in lib/)
+app: ## build the C++ sb-server (needs cores in lib/)
 	@scripts/build.sh --app-only $(if $(JOBS),-j $(JOBS),)
 
 .PHONY: all build
@@ -38,20 +38,23 @@ doctor: ## verify toolchain + vendored trees
 
 .PHONY: test
 test: ## unit tests only — no models, no native libs
-	@go test ./app/... ./web/... ./clients/...
+	@cmake -S server -B server/build -DCMAKE_BUILD_TYPE=Release >/dev/null
+	@cmake --build server/build -j $(if $(JOBS),$(JOBS),$$(nproc)) --target sb_tests
+	@server/build/tests/sb_tests
 
 .PHONY: test-e2e
-test-e2e: ## end-to-end tests — needs models, skips cleanly if absent
-	@SB_E2E=1 go test -tags e2e ./app/...
+test-e2e: ## end-to-end tests — needs models + cores + server, skips cleanly if absent
+	@scripts/test-e2e.sh
 
 .PHONY: check
-check: ## build cores -> check-symbols -> smoke test -> go vet -> go test
+check: ## build cores -> check-symbols -> smoke test -> build server -> unit tests
 	@scripts/build.sh --cores-only $(if $(JOBS),-j $(JOBS),)
-	@go vet ./app/... ./web/... ./clients/... && go test ./app/... ./web/... ./clients/...
+	@$(MAKE) app
+	@$(MAKE) test
 
 .PHONY: run
 run: app ## run sb-server with the current environment
-	@SB_LIB_DIR=$(ROOT)lib ./app/sb-server
+	@SB_LIB_DIR=$(ROOT)lib ./sb-server
 
 .PHONY: fetch-models
 fetch-models: ## download + sha256-verify model weights
@@ -63,5 +66,5 @@ bench: ## measure the latency budget
 
 .PHONY: clean
 clean: ## remove build outputs
-	@rm -rf build lib app/sb-server
+	@rm -rf build lib server/build sb-server
 	@echo "cleaned"
