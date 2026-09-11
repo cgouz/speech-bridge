@@ -11,9 +11,11 @@
  */
 #include "sb_mt.h"
 
+#include <algorithm>
 #include <cstring>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "llama.h"
@@ -22,6 +24,23 @@ namespace {
 std::once_flag g_backend_once;
 void backend_init() { llama_backend_init(); }
 constexpr int kMaxNewTokens = 512;
+
+// llama_context_params::n_threads = 0 looks like "let llama.cpp pick a
+// sensible default" but actually resolves, deep in ggml's graph planner
+// (ggml_graph_plan: `if (n_threads <= 0) n_threads = GGML_DEFAULT_N_THREADS`),
+// to the compile-time constant GGML_DEFAULT_N_THREADS = 4 — regardless of
+// how many cores the host has. Pick a real hardware-aware value instead.
+// Capped rather than using all cores: sentences translate concurrently on
+// separate worker threads (session.cpp dispatches one per sentence, plus up
+// to SB_STREAMS_MAX WS sessions), so an uncapped thread count per MT context
+// would oversubscribe the CPU exactly when latency matters most. 8 matches
+// common llama.cpp CPU-inference guidance — memory bandwidth, not core
+// count, dominates beyond that for a model this size.
+int DefaultMTThreads() {
+  unsigned hw = std::thread::hardware_concurrency();
+  if (hw == 0) return 4;  // hardware_concurrency() is allowed to return 0 if undetectable
+  return static_cast<int>(std::min(hw, 8u));
+}
 } // namespace
 
 struct sb_mt_model {
@@ -77,8 +96,9 @@ SB_API sb_mt_ctx *sb_mt_ctx_new(sb_mt_model *m) {
         cp.n_ctx = static_cast<uint32_t>(m->n_ctx);
         cp.n_batch = static_cast<uint32_t>(m->n_ctx);
         cp.n_ubatch = static_cast<uint32_t>(m->n_ctx);
-        cp.n_threads = 0;         // 0 => llama picks a sensible default
-        cp.n_threads_batch = 0;
+        const int nThreads = DefaultMTThreads();
+        cp.n_threads = nThreads;
+        cp.n_threads_batch = nThreads;
         c->lctx = llama_init_from_model(m->model, cp);
         if (!c->lctx) { delete c; return nullptr; }
 

@@ -13,6 +13,7 @@
  */
 #include "sb_tts.h"
 
+#include <algorithm>
 #include <cstring>
 #include <dirent.h>
 #include <map>
@@ -20,11 +21,24 @@
 #include <mutex>
 #include <string>
 #include <sys/stat.h>
+#include <thread>
 #include <vector>
 
 #include "sherpa-onnx/c-api/c-api.h"
 
 namespace {
+
+// Was hardcoded to 2 regardless of host size. VITS is a small model so this
+// won't be as dramatic a win as the MT core's fix (see cores/mt/sb_mt.cpp),
+// but leaving most of a many-core host idle during synthesis is still a free
+// latency win. Capped, not hardware_concurrency() directly, for the same
+// reason as MT: sentences synthesize concurrently on separate worker
+// threads, so an uncapped per-call thread count would oversubscribe the CPU.
+int default_vits_threads() {
+    unsigned hw = std::thread::hardware_concurrency();
+    if (hw == 0) return 2;
+    return static_cast<int>(std::min(hw, 4u));
+}
 
 bool is_dir(const std::string &p) {
     struct stat st{};
@@ -87,7 +101,7 @@ static const SherpaOnnxOfflineTts *make_tts(const std::string &dir,
     cfg.model.vits.noise_scale = 0.667f;
     cfg.model.vits.noise_scale_w = 0.8f;
     cfg.model.vits.length_scale = 1.0f;
-    cfg.model.num_threads = 2;
+    cfg.model.num_threads = default_vits_threads();
     cfg.model.provider = "cpu";
     cfg.model.debug = 0;
     cfg.max_num_sentences = 1;

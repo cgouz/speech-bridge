@@ -109,14 +109,32 @@ Linux x86_64, **CPU-only** (release build, AVX2+FMA, no `--metal`), 16-core /
 
 | metric | measured | budget |
 |--------|---------:|-------:|
-| batch end-to-end | ~5.9 s | < 11 s (7 s clip) ✓ |
-| EOU → translation | ~1.8 s | < 2 s ✓ |
-| EOU → first audio | ~2.9 s | < 4 s ✓ |
-| STT partial lag | ~0.8 s | < 300 ms |
-| batch stages | stt 1.8 s / mt 2.5 s / tts 1.7 s | — |
+| batch end-to-end | ~4.4 s | < 11 s (7 s clip) ✓ |
+| EOU → translation | ~1.2 s | < 2 s ✓ |
+| EOU → first audio | ~2.0 s | < 4 s ✓ |
+| STT partial lag | ~1.0 s | < 300 ms |
+| batch stages | stt 1.5 s / mt 1.8 s / tts 1.0 s | — |
 
 More CPU cores and RAM than the macOS reference host close most of the gap:
 batch end-to-end and EOU→audio both clear budget here (they missed it on
 macOS CPU-only). STT partial lag still misses the 300 ms budget — that number
-assumes Metal-accelerated STT, which this CPU-only run doesn't have.
+assumes Metal-accelerated STT, which this CPU-only run doesn't have; it's
+also bound by parakeet.cpp's own internal streaming chunk/cache window
+(its public API exposes no thread-count or chunk-size knob to tune from our
+integration layer — see `docs/blockers.md` #13).
+
+**MT/TTS threading fix (2026-09-11):** `cores/mt/sb_mt.cpp` and
+`cores/tts_vits/sb_tts_vits.cpp` were both leaving most of this host's cores
+idle — `n_threads=0` in llama.cpp resolves to a hard-coded `4`, not "auto,"
+and VITS had `num_threads` hardcoded to `2` outright (`docs/blockers.md` #13
+has the full story). Both now compute a hardware-aware, capped thread count.
+Same clip, same host, before → after:
+
+| metric | before | after | change |
+|--------|-------:|------:|-------:|
+| batch end-to-end | 5.9 s | 4.4 s | -26% |
+| mt_ms | 2.46 s | 1.8 s | -25% |
+| tts_ms | 1.68 s | 1.0 s | -41% |
+| EOU → translation | 1.8 s | 1.2 s | -30% |
+| EOU → first audio | 2.9 s | 2.0 s | -31% |
 

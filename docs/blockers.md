@@ -352,3 +352,52 @@ scope:**
   the real HTTP API with real models, but only when models are present.
   Porting the fakes would let that logic run under plain `make test` too —
   worth doing if `pipeline.cpp`'s branching grows more complex.
+
+---
+
+## 13. MT and VITS TTS were both silently under-threaded
+
+**Status:** resolved (MT, VITS); STT and magpie confirmed not affected /
+not fixable from our layer.
+
+Investigated while lowering the live-session latency budget. Two of the
+four cores were leaving most of a many-core host's CPU idle:
+
+- **MT (`cores/mt/sb_mt.cpp`).** `llama_context_params.n_threads = 0` reads
+  like "let llama.cpp pick a sensible default." It doesn't: tracing through
+  `third_party/llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c`'s `ggml_graph_plan()`,
+  `n_threads <= 0` resolves to the **compile-time constant**
+  `GGML_DEFAULT_N_THREADS = 4` — regardless of the host's actual core count.
+  On the 16-core box this was verified on, MT inference was running on 4
+  threads the whole time.
+- **VITS (`cores/tts_vits/sb_tts_vits.cpp`).** `cfg.model.num_threads` was
+  hardcoded to `2`, no host-awareness at all.
+
+Fix: both now compute a real thread count from
+`std::thread::hardware_concurrency()`, capped (8 for MT, 4 for VITS) rather
+than used raw — sentences translate/synthesize concurrently on separate
+worker threads (`server/src/httpapi/session.cpp` dispatches one per
+sentence, and up to `SB_STREAMS_MAX` WS sessions run at once), so an
+uncapped per-call thread count would oversubscribe the CPU exactly when
+latency matters most. Chosen empirically: bench numbers matched expectation
+(substantial, reproducible win) at these caps; not exhaustively tuned
+further. Measured before/after on the same host/clip in
+`docs/operations.md`'s benchmarking section — batch end-to-end -26%, MT
+-25%, TTS -41%, EOU→translation -30%, EOU→first audio -31%.
+
+**Confirmed NOT similarly fixable:**
+
+- **STT (`cores/stt/sb_stt.cpp`)** — `parakeet.cpp`'s public API
+  (`third_party/parakeet.cpp/include/{parakeet,parakeet_capi}.h`) exposes no
+  thread-count parameter at all; whatever it uses internally isn't something
+  our wrapper can override without patching the vendored engine. The
+  observed "STT partial lag" budget miss (~1s vs. a <300ms target that
+  assumes Metal) is therefore likely dominated by the model's own internal
+  streaming chunk/cache window, not a thread-starvation bug — nothing to fix
+  from `cores/stt/` as it stands.
+- **magpie TTS (`cores/tts_magpie/`)** — its flat C API
+  (`magpie_tts_capi.h`) also exposes no thread-count parameter, but its
+  richer struct-based API defaults `n_threads` to "0 = hardware
+  concurrency" (`third_party/magpie-tts.cpp/include/magpie_tts.h`), so the
+  flat API is presumably already using it — no fix needed unless proven
+  otherwise by a future benchmark.
