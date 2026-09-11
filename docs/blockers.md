@@ -109,9 +109,11 @@ uz fine-tune appears — only the manifest entry and `SB_STT_MODEL` change.
 
 ## 6. Uzbek & Karakalpak VITS TTS voices — need offline ONNX export
 
-**Status:** resolved. Both voices exported and verified producing real audio
-via `/v1/speak` (uz: 0.42s/13KB, kaa: 0.26s/8KB WAV, non-silent — peak/RMS
-checked). `/v1/capabilities` now reports `"vits":["kaa","ru","uz"]`.
+**Status:** resolved. Both voices exported and verified producing correctly
+paced, real audio via `/v1/speak` fed genuine Cyrillic text (duration now
+scales with text length like the known-good `ru` voice — see #15 for why
+earlier duration numbers here were misleadingly short). `/v1/capabilities`
+reports `"vits":["kaa","ru","uz"]`.
 
 `libsb_tts_vits` (sherpa-onnx / MMS-TTS) is meant to cover uz, ru, kaa — the
 languages magpie lacks. sherpa-onnx publishes a pre-built package only for
@@ -132,10 +134,17 @@ violate "no Python anywhere in build or runtime"):
 
 1. `python3.11 -m venv venv` (needs `python3.11-dev` headers for the Cython
    build below; the system default `python3` at the time was 3.12 without
-   headers installed). Install: `onnx scipy Cython numpy onnxscript` plus
-   `torch` from `https://download.pytorch.org/whl/cpu` (the recipe's original
-   `torch==1.13.0+cpu` pin is no longer published; latest CPU wheel — 2.14.0 at
-   export time — works with the fix in step 4).
+   headers installed). Install: `onnx scipy Cython numpy` plus
+   `torch==1.13.0+cpu --index-url https://download.pytorch.org/whl/cpu` — this
+   exact pin from the original csukuangfj recipe **is** still available as a
+   `cp311` wheel there (an earlier pass here mistakenly concluded it wasn't,
+   from a bare `pip install torch==1.13.0+cpu` without the CPU index URL, and
+   used the latest wheel — 2.14.0 at the time — plus a `dynamo=False` patch to
+   force its legacy tracer instead; that export was never actually the
+   problem — see #15 — but 1.13.0 avoids depending on a newer torch version's
+   legacy-tracer fallback at all, which is closer to what the officially
+   shipped `vits-mms-rus`/`vits-mms-ukr` packages were built with, so it's
+   what's actually deployed here).
 2. `git clone --depth 1 https://huggingface.co/spaces/mms-meta/MMS` — build its
    `vits/monotonic_align` Cython extension in place (`setup.py build_ext
    --inplace` from within `vits/monotonic_align/`, copy the built `.so` next to
@@ -146,20 +155,20 @@ violate "no Python anywhere in build or runtime"):
    `https://huggingface.co/facebook/mms-tts/resolve/main/models/<lang>/`
    (`G_100000.pth`, `config.json`, `vocab.txt`) — language codes `uzb`
    (Cyrillic script) and `kaa`.
-4. Run the export script from
+4. Run the unmodified export script from
    `https://huggingface.co/csukuangfj/vits-mms-rus/raw/main/vits-mms.py` with
    `PYTHONPATH` including the cloned `MMS` and `MMS/vits` dirs and
-   `language=<lang>` set, **with one required patch**: add `dynamo=False` to
-   the `torch.onnx.export(...)` call. Without it, torch ≥2.x defaults to its
-   new dynamo/`torch.export`-based tracer, which fails with
-   `GuardOnDataDependentSymNode` on `vits/transforms.py:105`
-   (`if torch.min(inputs) < left or torch.max(inputs) > right:` — VITS's
-   rational-quadratic-spline flow has genuinely data-dependent control flow
-   that the strict symbolic tracer rejects). `dynamo=False` forces the legacy
-   TorchScript-based tracer this script was originally written against, which
-   handles it fine (with only `TracerWarning`s, not errors).
+   `language=<lang>` set.
 5. Produces `model.onnx` + `tokens.txt`; copy to
    `$SB_MODELS_DIR/tts_vits/vits-mms-{uzb,kaa}/`.
+
+Both `uzb` and `ukr` (and evidently other MMS checkpoints trained via the
+wav2vec2/CTC-style pipeline) embed `|` as vocab id 0 and a literal space as a
+separate, late entry — cosmetic labeling of what's functionally just the
+`add_blank` pad slot (see #15); no vocab.txt editing or space/pipe
+substitution is needed, confirmed by diffing against the officially published
+`vits-mms-ukr.tar.bz2`, which has the same shape and works correctly
+unmodified.
 
 **Why these aren't in `fetch-models.sh`'s manifest block:** that script only
 downloads from fixed, stable URLs it can sha256-verify. These two files have no
@@ -493,3 +502,57 @@ pressed, with no duplicate/overlapping audio. Re-ran the original punctuated
 fixture afterward to confirm no regression (still dispatches on sentence
 boundaries where they exist, still no duplicates). `make test-e2e` and the
 unit suite (`sb_tests`, 109 assertions) both still pass.
+
+---
+
+## 15. Live-session TTS spoke the caption text, not the translation
+
+**Status:** fixed.
+
+User report after #14 landed: "hear voice but not human voice, very short,
+almost doesn't work." Reproduced with real audio through `/v1/speak`: a
+~70-character Uzbek sentence in **Cyrillic** (what MADLAD actually emits, and
+what the `uz`/`kaa` MMS voices are trained on — see `models/MANIFEST.md`'s
+"MADLAD emits Uzbek in Cyrillic" note) played correctly at ~5.5s, matching the
+known-good `ru` voice's rate for similar-length text. The same sentence
+**transliterated to Latin** played at ~0.7s — a ~7x reduction, garbled,
+because `sherpa-onnx`'s character frontend
+(`offline-tts-character-frontend.cc::ConvertTextToTokenIds`) silently drops
+any character not in the voice's vocab, and a Cyrillic-only vocab contains no
+Latin letters at all: nearly the entire sentence vanishes before synthesis,
+leaving a token stream of little more than spaces and punctuation.
+
+First chased this down the wrong path — spent real effort re-exporting both
+voices with `torch==1.13.0+cpu` (see #6) suspecting the export itself, since
+the initial verification of #6 tested `/v1/speak` with **hand-typed Latin**
+Uzbek text and never caught that the `uz` MMS voice needs Cyrillic. Confirmed
+the export was never the problem by A/B testing against the officially
+published `vits-mms-ukr.tar.bz2` (same "|"-at-id-0 vocab shape, same
+pipeline) swapped in as a temporary stand-in for `uz` — it produced the exact
+same abnormally short duration for the same (Latin) test input, proving the
+bug was in what text reached the frontend, not in either export.
+
+Root cause, once found: `Session::Dispatch`
+(`server/src/httpapi/session.cpp`) reused one variable for two different
+jobs. MT's raw output is Cyrillic; the code did
+`translated = pipeline::ForDisplay(out.text, target_lang)` — converting to
+Latin for the on-screen caption — and then passed that *same, now-Latin*
+`translated` into `Synth(ForTTS(translated, ...), ...)` for the actual audio.
+`ForDisplay` only transliterates for `uz`, and `uz` TTS had no real voice
+until #6, so this bug was latent from the original Go implementation
+(`app/internal/session/session.go`, pre-dating the C++ rewrite) — copied
+faithfully across the C++ port — never exercised until a working `uz` voice
+existed to expose it. The batch REST path
+(`server/src/pipeline/pipeline.cpp`'s speech-to-speech handler) keeps the raw
+MT text (`out`) and the display text (`display`) as separate variables
+already and was never affected.
+
+**Fix:** `Dispatch` now keeps `spoken` (MT's raw output, passed to `Synth`)
+and the caption message's `ForDisplay`'d text as two independent values —
+comment added explaining why they must never be merged back into one
+variable. Verified via `/v1/speak` with real Cyrillic input (duration back to
+~5.5s for a ~70-char sentence, matching `ru`) and via a full live WS session
+with the app's actual default settings (`ru`→`uz`): audio sample counts now
+scale with translated-sentence length (e.g. 43409 samples / 16kHz = 2.71s for
+a 34-character sentence — before the fix, every sentence regardless of length
+was well under 1s). `make test-e2e` and `sb_tests` (109 assertions) pass.

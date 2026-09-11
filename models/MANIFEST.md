@@ -76,9 +76,9 @@ output) at export time, for provenance only — **not** parsed by
 
 | file | sha256 | bytes |
 |------|--------|-------|
-| `tts_vits/vits-mms-uzb/model.onnx` | `84200809d357ee4b0137a7ecc55ba682b4eb3a024dd5b35c04c77e90248f2879` | 114028272 |
+| `tts_vits/vits-mms-uzb/model.onnx` | `da14a6999d07f74bd395b8509d418f2a37783e4d3dedac5bdd2c0ca991e30472` | 114022324 |
 | `tts_vits/vits-mms-uzb/tokens.txt` | `7a0f66003c6a99a5cd5a783dfede839b74897ec594a642f304c11af1a5d1c8ee` | 448 |
-| `tts_vits/vits-mms-kaa/model.onnx` | `7e0b4c70f15424330d912e3d97d026f2d2b41daf84882c9a144f649dc3794487` | 114029808 |
+| `tts_vits/vits-mms-kaa/model.onnx` | `9b77fd0040b919fab9ed14956e0db640b7c7dd88e6bc4fa21bdadff9145e6df0` | 114023860 |
 | `tts_vits/vits-mms-kaa/tokens.txt` | `973b96302571e07f4fcabc958b564a942a6fa563141235e944148192f6fbdc1f` | 519 |
 
 ## Other quants (not fetched by default)

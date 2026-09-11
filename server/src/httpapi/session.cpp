@@ -226,14 +226,22 @@ void Session::Dispatch(const std::string &sentence, int64_t t0, int64_t t1) {
     ScopeExit onExit{[self] { self->WorkerDone(); }};
 
     std::string src = self->cfg_.source_lang.empty() ? "auto" : self->cfg_.source_lang;
-    std::string translated = sentence;
+    // spoken holds MT's raw output (e.g. Cyrillic for uz/kaa, which is what
+    // MADLAD emits and what the MMS VITS voices were trained on) — this is
+    // what gets synthesized. ForDisplay's job is the opposite direction, for
+    // on-screen captions only (Cyrillic -> Latin for uz); feeding its output
+    // to Synth() instead of the raw MT text silently drops nearly every
+    // character for a Cyrillic-only voice (Latin letters aren't in its
+    // vocab), producing short, garbled, near-silent audio. Keep the two uses
+    // of the translation on separate variables so this can't regress.
+    std::string spoken = sentence;
     try {
       auto out = self->pipe_->Translate(sentence, src, self->cfg_.target_lang);
       if (out.ok) {
-        translated = pipeline::ForDisplay(out.text, self->cfg_.target_lang);
+        spoken = out.text;
         Msg m;
         m.type = "translation";
-        m.text = translated;
+        m.text = pipeline::ForDisplay(out.text, self->cfg_.target_lang);
         m.seq = seq;
         self->send_(m);
       } else {
@@ -255,7 +263,7 @@ void Session::Dispatch(const std::string &sentence, int64_t t0, int64_t t1) {
     }
 
     try {
-      auto sr = self->pipe_->Synth(pipeline::ForTTS(translated, self->cfg_.target_lang), self->cfg_.target_lang,
+      auto sr = self->pipe_->Synth(pipeline::ForTTS(spoken, self->cfg_.target_lang), self->cfg_.target_lang,
                                     self->cfg_.voice);
       if (!sr.ok) {
         Msg m;
