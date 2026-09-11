@@ -16,7 +16,9 @@ $SB_MODELS_DIR/
 ├── mt/madlad400-3b-mt-q4_k.gguf                     -> SB_MT_MODEL
 ├── tts_magpie/magpie-tts-multilingual-357m-q4_k.gguf -> SB_TTS_MAGPIE_MODEL
 └── tts_vits/                                        -> SB_TTS_VITS_DIR
-    └── vits-mms-rus/   (model.onnx, tokens.txt)
+    ├── vits-mms-rus/   (model.onnx, tokens.txt)
+    ├── vits-mms-uzb/   (model.onnx, tokens.txt)   # Cyrillic — locally exported, see below
+    └── vits-mms-kaa/   (model.onnx, tokens.txt)   # locally exported, see below
 ```
 
 ## Fetch set (parsed by scripts/fetch-models.sh)
@@ -57,20 +59,27 @@ file	tts_vits/vits-mms-rus/tokens.txt	361fb8874d234fee4893091334ffcdd10a30367dc7
   ar + 3 Arabic variants). It is unused for the ru→uz meeting path; it serves
   target languages in its set.
 
-## Deferred: Uzbek & Karakalpak VITS voices
+## Uzbek & Karakalpak VITS voices — locally exported, not in the fetch set
 
 sherpa-onnx ships a pre-built package only for Russian MMS. `facebook/mms-tts-uzb-script_cyrillic`
-and `facebook/mms-tts-kaa` exist but in HF-Transformers format; converting to the
-sherpa-onnx VITS layout is a one-off **offline** step (sherpa's
-`scripts/mms/export-onnx-mms.py`, Python — not part of build or runtime). Tracked
-in `../docs/blockers.md`. Until then `/v1/capabilities` reports uz/kaa TTS as
-unavailable and the pipeline degrades to captions-only for those targets.
+and `facebook/mms-tts-kaa` exist only in HF-Transformers format upstream, with
+no published ONNX build — unlike `vits-mms-rus`, there is no stable URL
+`fetch-models.sh` can download and sha256-verify. They were traced to ONNX
+locally with `torch.onnx.export` (recipe + exact commands in
+`../docs/blockers.md` #6, including the `dynamo=False` fix current torch needs
+for this model). Re-run that recipe to reproduce them; they are gitignored
+like every other model weight.
 
-Expected final layout once prepared:
-```
-tts_vits/vits-mms-uzb/   (model.onnx, tokens.txt)   # Cyrillic
-tts_vits/vits-mms-kaa/
-```
+sha256 of the files verified working (via `/v1/speak`, real non-silent audio
+output) at export time, for provenance only — **not** parsed by
+`fetch-models.sh`:
+
+| file | sha256 | bytes |
+|------|--------|-------|
+| `tts_vits/vits-mms-uzb/model.onnx` | `84200809d357ee4b0137a7ecc55ba682b4eb3a024dd5b35c04c77e90248f2879` | 114028272 |
+| `tts_vits/vits-mms-uzb/tokens.txt` | `7a0f66003c6a99a5cd5a783dfede839b74897ec594a642f304c11af1a5d1c8ee` | 448 |
+| `tts_vits/vits-mms-kaa/model.onnx` | `7e0b4c70f15424330d912e3d97d026f2d2b41daf84882c9a144f649dc3794487` | 114029808 |
+| `tts_vits/vits-mms-kaa/tokens.txt` | `973b96302571e07f4fcabc958b564a942a6fa563141235e944148192f6fbdc1f` | 519 |
 
 ## Other quants (not fetched by default)
 

@@ -109,7 +109,9 @@ uz fine-tune appears — only the manifest entry and `SB_STT_MODEL` change.
 
 ## 6. Uzbek & Karakalpak VITS TTS voices — need offline ONNX export
 
-**Status:** deferred (milestone 8); TTS degrades to captions-only for uz/kaa.
+**Status:** resolved. Both voices exported and verified producing real audio
+via `/v1/speak` (uz: 0.42s/13KB, kaa: 0.26s/8KB WAV, non-silent — peak/RMS
+checked). `/v1/capabilities` now reports `"vits":["kaa","ru","uz"]`.
 
 `libsb_tts_vits` (sherpa-onnx / MMS-TTS) is meant to cover uz, ru, kaa — the
 languages magpie lacks. sherpa-onnx publishes a pre-built package only for
@@ -117,21 +119,55 @@ Russian (`vits-mms-rus`, in the `tts-models` GitHub release). The upstream
 weights for Uzbek (`facebook/mms-tts-uzb-script_cyrillic`) and Karakalpak
 (`facebook/mms-tts-kaa`) exist but only in HF-Transformers format.
 
-Converting to the sherpa-onnx VITS layout (`model.onnx` + `tokens.txt` +
-`config.json`) needs sherpa's `scripts/mms/export-onnx-mms.py` — **Python**.
-That is an offline, one-time model-prep step (not part of build or runtime, so
-it does not violate "no Python anywhere in build or runtime"), but it is not yet
-done here.
+**Correction to the originally planned recipe:** sherpa-onnx's current repo
+does **not** contain a `scripts/mms/export-onnx-mms.py` — that script does not
+exist upstream (checked at export time). The actual working recipe traces the
+HF-Transformers VITS checkpoint to ONNX directly with `torch.onnx.export`,
+using the export script and `monotonic_align` Cython extension from the
+`mms-meta/MMS` HF Space (the same one `csukuangfj/vits-mms-rus` — the
+pre-built Russian voice sherpa-onnx already ships — was itself built with).
 
-**Interim behavior:** `fetch-models.sh` fetches ru only. `/v1/capabilities` and
-`/ready` report uz/kaa TTS unavailable; the pipeline runs captions-only for
-those targets (degraded mode, per spec). The primary ru→uz meeting demo needs
-the uz voice, so this gap must close in milestone 8.
+**Recipe actually used** (offline, one-time, outside build/runtime — does not
+violate "no Python anywhere in build or runtime"):
 
-**Recipe (milestone 8):** in a throwaway venv, run sherpa's
-`export-onnx-mms.py` for `uzb` (cyrillic) and `kaa`, drop the outputs under
-`$SB_MODELS_DIR/tts_vits/vits-mms-{uzb,kaa}/`, add `file` entries with sha256 to
-`models/MANIFEST.md`.
+1. `python3.11 -m venv venv` (needs `python3.11-dev` headers for the Cython
+   build below; the system default `python3` at the time was 3.12 without
+   headers installed). Install: `onnx scipy Cython numpy onnxscript` plus
+   `torch` from `https://download.pytorch.org/whl/cpu` (the recipe's original
+   `torch==1.13.0+cpu` pin is no longer published; latest CPU wheel — 2.14.0 at
+   export time — works with the fix in step 4).
+2. `git clone --depth 1 https://huggingface.co/spaces/mms-meta/MMS` — build its
+   `vits/monotonic_align` Cython extension in place (`setup.py build_ext
+   --inplace` from within `vits/monotonic_align/`, copy the built `.so` next to
+   `core.pyx`, `sed 's/\.monotonic_align\.core/.core/g'` on
+   `vits/monotonic_align/__init__.py` since the extension is built flat, not as
+   a subpackage).
+3. Fetch checkpoint + config + vocab for each language from
+   `https://huggingface.co/facebook/mms-tts/resolve/main/models/<lang>/`
+   (`G_100000.pth`, `config.json`, `vocab.txt`) — language codes `uzb`
+   (Cyrillic script) and `kaa`.
+4. Run the export script from
+   `https://huggingface.co/csukuangfj/vits-mms-rus/raw/main/vits-mms.py` with
+   `PYTHONPATH` including the cloned `MMS` and `MMS/vits` dirs and
+   `language=<lang>` set, **with one required patch**: add `dynamo=False` to
+   the `torch.onnx.export(...)` call. Without it, torch ≥2.x defaults to its
+   new dynamo/`torch.export`-based tracer, which fails with
+   `GuardOnDataDependentSymNode` on `vits/transforms.py:105`
+   (`if torch.min(inputs) < left or torch.max(inputs) > right:` — VITS's
+   rational-quadratic-spline flow has genuinely data-dependent control flow
+   that the strict symbolic tracer rejects). `dynamo=False` forces the legacy
+   TorchScript-based tracer this script was originally written against, which
+   handles it fine (with only `TracerWarning`s, not errors).
+5. Produces `model.onnx` + `tokens.txt`; copy to
+   `$SB_MODELS_DIR/tts_vits/vits-mms-{uzb,kaa}/`.
+
+**Why these aren't in `fetch-models.sh`'s manifest block:** that script only
+downloads from fixed, stable URLs it can sha256-verify. These two files have no
+such stable public URL — they're a local export, not a published release
+artifact (unlike `vits-mms-rus`, which csukuangfj published to HF). They are
+gitignored like all other model weights; re-run the recipe above to reproduce
+them. sha256 recorded in `models/MANIFEST.md` for provenance of the exact
+files verified working, not for `fetch-models.sh` to check.
 
 ---
 
