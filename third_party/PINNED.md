@@ -55,7 +55,51 @@ self-contained shared library. They are never combined into one link unit.
 
 ## Trimming
 
-No vendored tree has been trimmed. Trimming (`examples/`, `docs/`,
-`tests/`) is permitted only as a separate step after all cores build and
-pass the one-process smoke test, and only for directories provably unused
-by the build.
+No vendored inference-engine tree has been trimmed. Trimming (`examples/`,
+`docs/`, `tests/`) is permitted only as a separate step after all cores
+build and pass the one-process smoke test, and only for directories
+provably unused by the build.
+
+---
+
+# Vendored application libraries — the `pure-cpp` server
+
+Everything below backs the C++ rewrite of the Go orchestrator (HTTP/WS
+server, JSON, unit tests). Same rule: read-only, vendored whole or as an
+official amalgamated distribution, never hand-edited.
+
+Vendored on: 2026-09-11
+
+| name              | origin                                             | commit / tag                                | notes |
+|-------------------|-----------------------------------------------------|----------------------------------------------|-------|
+| `uWebSockets`      | https://github.com/uNetworking/uWebSockets.git      | `v20.80.0`                                    | header-only C++17; trimmed to `src/` + `uSockets/` (see below) |
+| `uWebSockets/uSockets` | https://github.com/uNetworking/uSockets.git     | `86097c490263ab662d62e8e7b541390bdec7d149`    | uWebSockets v20.80.0's pinned submodule commit; trimmed to `src/` (no TLS/QUIC — see below) |
+| `nlohmann_json`    | https://github.com/nlohmann/json.git                | `v3.12.0`                                     | official single-header amalgamation (`single_include/nlohmann/json.hpp`), not a full clone |
+| `catch2`           | https://github.com/catchorg/Catch2.git              | `v3.16.0`                                     | official two-file amalgamation (`extras/catch_amalgamated.{hpp,cpp}`), not a full clone |
+
+## uWebSockets / uSockets trimming
+
+Vendored whole at v20.80.0, then trimmed to only what our server needs:
+
+- Removed (uWebSockets): `autobahn/`, `benchmarks/`, `build.c`, `build.h`,
+  `cluster/`, `examples/`, `fuzzing/`, `GNUmakefile`, `h1spec/` (unpopulated
+  submodule), `libdeflate/` (unpopulated submodule — permessage-deflate
+  compression, unused), `libEpollBenchmarker/`, `misc/`, `tests/`, `Makefile`
+  (we build via our own CMake, not uWebSockets' Makefile).
+- Removed (uSockets): `boringssl/` and `lsquic/` (unpopulated submodules —
+  TLS and HTTP/3/QUIC, both unused: the server binds `127.0.0.1`/an internal
+  network only, matching the existing Go server's plain-HTTP posture),
+  `examples/`, `misc/`, `tests/`, `Makefile`, `module.modulemap`.
+- Kept: `uWebSockets/src/*.h` (all headers) and `uWebSockets/uSockets/src/`
+  in full (`crypto/`, `io_uring/`, `quic.c/h`, and the `libuv`/`asio`/`gcd`
+  eventing backends stay vendored but are simply not compiled — see
+  `cores/server_cpp/CMakeLists.txt`, which builds only `bsd.c`, `context.c`,
+  `loop.c`, `socket.c`, `udp.c`, and `eventing/epoll_kqueue.c` — the third
+  eventing backend, `#ifdef`-selected between epoll (Linux) and kqueue
+  (macOS/BSD), matching this project's other two target platforms).
+
+## nlohmann_json / catch2
+
+Both projects publish an official amalgamated distribution specifically for
+vendoring (one/two files, no build system, no test suite) — used instead of
+a full clone, consistent with "vendor exactly what integration needs."
