@@ -105,6 +105,19 @@ void Session::Stop() {
       // matches Go: Finish()'s error is swallowed here, only success events handled
     }
   }
+  // sb_stt_finish() is documented to never fabricate an <EOU> — if the model
+  // genuinely never closed out the last sentence (e.g. the speaker stopped
+  // talking and immediately hit Stop, with no silence gap for the model's
+  // own EOU to fire on), last_partial_text_ still holds it. Force it through
+  // here rather than silently dropping the tail of what was said.
+  if (!last_partial_text_.empty()) {
+    auto sentences = SplitOrWhole(last_partial_text_);
+    for (size_t i = dispatched_in_utterance_; i < sentences.size(); i++) {
+      Dispatch(sentences[i], last_partial_end_ms_, last_partial_end_ms_);
+    }
+    dispatched_in_utterance_ = 0;
+    last_partial_text_.clear();
+  }
   stopping_.store(true);
   if (pending_.load() == 0) {
     FlushReorder();
@@ -126,10 +139,30 @@ void Session::HandleEvents(const std::vector<core::STTEvent> &evs) {
       m.seq = PeekSeq();
       m.t1_ms = e.end_ms;
       send_(m);
-    } else if (e.kind == core::STTEventKind::kFinalEOU) {
-      for (auto &sent : SplitOrWhole(e.text)) {
-        Dispatch(sent, e.start_ms, e.end_ms);
+
+      last_partial_text_ = e.text;
+      last_partial_end_ms_ = e.end_ms;
+
+      // Real-time sentence flushing (see the class-header comment on
+      // HandleEvents): dispatch every sentence found before the still-open
+      // trailing fragment, without waiting for the model's own <EOU>.
+      auto sentences = pipeline::Sentences(e.text);
+      if (sentences.size() > dispatched_in_utterance_ + 1) {
+        size_t confirmed = sentences.size() - 1;  // exclude the still-growing tail
+        for (size_t i = dispatched_in_utterance_; i < confirmed; i++) {
+          Dispatch(sentences[i], e.start_ms, e.end_ms);
+        }
+        dispatched_in_utterance_ = confirmed;
       }
+    } else if (e.kind == core::STTEventKind::kFinalEOU) {
+      // The utterance is genuinely over now — the trailing fragment withheld
+      // above (if any) is safe to dispatch too.
+      auto sentences = SplitOrWhole(e.text);
+      for (size_t i = dispatched_in_utterance_; i < sentences.size(); i++) {
+        Dispatch(sentences[i], e.start_ms, e.end_ms);
+      }
+      dispatched_in_utterance_ = 0;
+      last_partial_text_.clear();
     }
   }
 }

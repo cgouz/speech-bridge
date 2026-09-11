@@ -66,6 +66,17 @@ class Session : public std::enable_shared_from_this<Session> {
   void Stop();
 
  private:
+  // Dispatches every complete sentence in a growing utterance as soon as it's
+  // safe to, rather than waiting for the STT model's own <EOU> — parakeet's
+  // EOU model is trained for conversational turn-taking, not sentence
+  // boundaries, and may not fire until the speaker falls silent for a while
+  // (or the stream ends), which would otherwise hold every sentence in a
+  // multi-sentence turn hostage until the whole thing is spoken. Safe rule:
+  // any sentence text::SplitSentences finds *before* the still-growing
+  // trailing fragment of a PARTIAL is final — a streaming ASR model doesn't
+  // revise text once new words have been recognized after it. The trailing
+  // fragment itself only dispatches once the true <EOU> confirms the
+  // utterance is over (see dispatched_in_utterance_).
   void HandleEvents(const std::vector<core::STTEvent> &evs);
   void Dispatch(const std::string &sentence, int64_t t0, int64_t t1);
   void MarkReorder(int seq, std::vector<float> pcm, int sr);
@@ -82,6 +93,17 @@ class Session : public std::enable_shared_from_this<Session> {
 
   std::mutex mu_;  // guards seq_, reorder_, reorder_sr_, next_emit_
   int seq_ = 0;
+  // Count of sentences already dispatched from the CURRENT open utterance
+  // (see HandleEvents) — reset to 0 once the model's <EOU> closes it out.
+  // Only ever touched from PushAudio/Stop, both on the event-loop thread, so
+  // this needs no lock (unlike seq_, which Dispatch's worker threads also read).
+  size_t dispatched_in_utterance_ = 0;
+  // The most recent PARTIAL text and its end timestamp, kept so Stop() can
+  // force-flush an undispatched trailing fragment if the stream ends before
+  // the model ever fires a genuine <EOU> for it (sb_stt_finish() is
+  // documented to never fabricate one — see Stop()'s comment).
+  std::string last_partial_text_;
+  int64_t last_partial_end_ms_ = 0;
   std::map<int, std::vector<float>> reorder_;
   std::map<int, int> reorder_sr_;
   int next_emit_ = 0;
