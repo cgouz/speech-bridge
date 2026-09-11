@@ -437,3 +437,59 @@ further. Measured before/after on the same host/clip in
   concurrency" (`third_party/magpie-tts.cpp/include/magpie_tts.h`), so the
   flat API is presumably already using it — no fix needed unless proven
   otherwise by a future benchmark.
+
+---
+
+## 14. Real-time dispatch stalled indefinitely on unpunctuated speech
+
+**Status:** fixed.
+
+Blocker #12's real-time sentence dispatch (`Session::HandleEvents`) only
+flushed a sentence once `text::SplitSentences` found sentence-ending
+punctuation in the growing PARTIAL. That's fine for clean, punctuated
+narration (the `parakeet.cpp` test fixture, or the `en->ru` e2e clip) — but
+streaming ASR punctuation restoration is unreliable mid-utterance, especially
+for non-English source languages, and normal continuous/conversational
+speech routinely runs many seconds without producing one. With no boundary
+ever found, `sentences.size()` never grows past what's already dispatched,
+and the session falls all the way back to waiting for parakeet's own `<EOU>`
+(trained for turn-taking pauses, not sentence breaks — see #5) or `Stop()`.
+From the user's seat that reads as "nothing translates/speaks until I press
+Stop" — reproduced end-to-end with a Playwright session against the real
+server: default settings (`source=ru`, `target=uz`, the app's own load-time
+default) speaking English test audio (forcing `ru` phonetic decoding, which
+produces text with essentially no sentence-final punctuation) — zero
+`transcript` events fired for the whole 15s listening window, one arrived
+only once `Stop` triggered `Finish()`.
+
+**Fix:** `Session::DispatchGrowingText` (renamed from the old
+sentence-count-based logic; `server/src/httpapi/session.{h,cpp}`) now tracks
+`dispatched_len_`, a byte offset into the growing utterance text already
+handed to `Dispatch()`, instead of a sentence-array index. On top of the
+existing punctuation-boundary dispatch, it also force-flushes whatever
+undispatched tail exists once that tail has sat open for
+`kMaxChunkLatencyMs` (3000 ms) of audio time, regardless of punctuation —
+bounding worst-case latency to one rolling ~3s chunk instead of an entire
+unbounded utterance. This is the same trade-off real-time speech-to-speech
+products (e.g. Samsung's Live Translate) make: translate in short rolling
+windows when a clean sentence boundary doesn't show up in time, rather than
+waiting indefinitely for one.
+
+One subtlety this introduced and fixed in the same pass: once a fallback
+chunk cuts a sentence mid-way, the *next* partial's newly-punctuated version
+of that same sentence would otherwise re-match and get dispatched a second
+time (spoken twice — worse than the latency problem it fixes). Fixed by only
+treating a found sentence as wholly new when it *starts* at or after
+`dispatched_len_`; a sentence that only partially overlaps already-dispatched
+text is absorbed into `dispatched_len_` without a second `Dispatch()` call
+(silently drops the last couple of trailing words of that one sentence's
+translation — an acceptable trade for never repeating audio out loud).
+
+**Verified** with real audio through the actual WS session (not just unit
+logic): a Playwright test against a long, deliberately unpunctuated ~15s
+English run-on synthesized via `/v1/speak` (`lang=en`, magpie) now dispatches
+transcript → translation → audio roughly every 3s, all well before `Stop` is
+pressed, with no duplicate/overlapping audio. Re-ran the original punctuated
+fixture afterward to confirm no regression (still dispatches on sentence
+boundaries where they exist, still no duplicates). `make test-e2e` and the
+unit suite (`sb_tests`, 109 assertions) both still pass.

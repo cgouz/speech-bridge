@@ -74,10 +74,25 @@ class Session : public std::enable_shared_from_this<Session> {
   // multi-sentence turn hostage until the whole thing is spoken. Safe rule:
   // any sentence text::SplitSentences finds *before* the still-growing
   // trailing fragment of a PARTIAL is final — a streaming ASR model doesn't
-  // revise text once new words have been recognized after it. The trailing
-  // fragment itself only dispatches once the true <EOU> confirms the
-  // utterance is over (see dispatched_in_utterance_).
+  // revise text once new words have been recognized after it.
+  //
+  // That alone isn't enough, though: SplitSentences only finds a boundary at
+  // sentence-ending punctuation, and streaming ASR punctuation restoration is
+  // unreliable mid-utterance (more so for non-English source languages) — a
+  // long, continuous, run-on turn can go many seconds without ever producing
+  // one, which would silently fall back to "wait for <EOU>/Stop" and defeat
+  // real-time dispatch entirely. DispatchGrowingText also force-flushes the
+  // open (unpunctuated) tail once it has sat undispatched for
+  // kMaxChunkLatencyMs of audio time, the same rolling-chunk trade-off
+  // real-time speech-to-speech products make (bounded latency over waiting
+  // for a clean sentence boundary that may never come).
   void HandleEvents(const std::vector<core::STTEvent> &evs);
+  // Dispatches whatever new, not-yet-dispatched text `text` (the STT event's
+  // full growing-utterance transcript so far) contains — see the class doc
+  // comment on HandleEvents. `isFinal` is true only for a genuine <EOU> or
+  // Stop()'s force-flush: every sentence found (plus any trailing
+  // unpunctuated fragment) is dispatched, no hold-back and no timer.
+  void DispatchGrowingText(const std::string &text, int64_t t0, int64_t t1, bool isFinal);
   void Dispatch(const std::string &sentence, int64_t t0, int64_t t1);
   void MarkReorder(int seq, std::vector<float> pcm, int sr);
   void FlushReorder();
@@ -93,11 +108,22 @@ class Session : public std::enable_shared_from_this<Session> {
 
   std::mutex mu_;  // guards seq_, reorder_, reorder_sr_, next_emit_
   int seq_ = 0;
-  // Count of sentences already dispatched from the CURRENT open utterance
-  // (see HandleEvents) — reset to 0 once the model's <EOU> closes it out.
-  // Only ever touched from PushAudio/Stop, both on the event-loop thread, so
-  // this needs no lock (unlike seq_, which Dispatch's worker threads also read).
-  size_t dispatched_in_utterance_ = 0;
+  // Byte offset into the CURRENT open utterance's growing transcript already
+  // handed to Dispatch() (see DispatchGrowingText) — reset to 0 once the
+  // model's <EOU> closes the utterance out. A streaming ASR model only ever
+  // extends its hypothesis with a stable prefix (see HandleEvents' doc
+  // comment), so this offset stays valid as `text` grows across calls. Only
+  // ever touched from PushAudio/Stop, both on the event-loop thread, so this
+  // needs no lock (unlike seq_, which Dispatch's worker threads also read).
+  size_t dispatched_len_ = 0;
+  // Audio-timeline ms (STTEvent::end_ms) at which the current undispatched
+  // open tail was first observed non-empty; -1 while there is no open tail.
+  // DispatchGrowingText force-flushes the tail once "now" (the latest
+  // event's end_ms) exceeds this by kMaxChunkLatencyMs, so a long run-on
+  // utterance with no sentence-ending punctuation still gets translated
+  // within a bounded delay instead of only at <EOU>/Stop.
+  int64_t chunk_open_ms_ = -1;
+  static constexpr int64_t kMaxChunkLatencyMs = 3000;
   // The most recent PARTIAL text and its end timestamp, kept so Stop() can
   // force-flush an undispatched trailing fragment if the stream ends before
   // the model ever fires a genuine <EOU> for it (sb_stt_finish() is

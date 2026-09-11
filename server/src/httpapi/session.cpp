@@ -33,14 +33,6 @@ std::vector<float> DecodeFrame(const uint8_t *data, size_t len, const std::strin
   return out;
 }
 
-// splitOrWhole mirrors session.go's helper: whole trimmed text as a single
-// "sentence" if the splitter found no boundaries in it.
-std::vector<std::string> SplitOrWhole(const std::string &text) {
-  auto s = pipeline::Sentences(text);
-  if (s.empty() && !sb::text::TrimSpace(text).empty()) return {sb::text::TrimSpace(text)};
-  return s;
-}
-
 // Runs `fn` when the enclosing scope exits (any return path) — C++ has no
 // `defer`; this stands in for Go's `defer s.pending.Done()`.
 struct ScopeExit {
@@ -111,11 +103,9 @@ void Session::Stop() {
   // own EOU to fire on), last_partial_text_ still holds it. Force it through
   // here rather than silently dropping the tail of what was said.
   if (!last_partial_text_.empty()) {
-    auto sentences = SplitOrWhole(last_partial_text_);
-    for (size_t i = dispatched_in_utterance_; i < sentences.size(); i++) {
-      Dispatch(sentences[i], last_partial_end_ms_, last_partial_end_ms_);
-    }
-    dispatched_in_utterance_ = 0;
+    DispatchGrowingText(last_partial_text_, last_partial_end_ms_, last_partial_end_ms_, /*isFinal=*/true);
+    dispatched_len_ = 0;
+    chunk_open_ms_ = -1;
     last_partial_text_.clear();
   }
   stopping_.store(true);
@@ -143,27 +133,73 @@ void Session::HandleEvents(const std::vector<core::STTEvent> &evs) {
       last_partial_text_ = e.text;
       last_partial_end_ms_ = e.end_ms;
 
-      // Real-time sentence flushing (see the class-header comment on
-      // HandleEvents): dispatch every sentence found before the still-open
-      // trailing fragment, without waiting for the model's own <EOU>.
-      auto sentences = pipeline::Sentences(e.text);
-      if (sentences.size() > dispatched_in_utterance_ + 1) {
-        size_t confirmed = sentences.size() - 1;  // exclude the still-growing tail
-        for (size_t i = dispatched_in_utterance_; i < confirmed; i++) {
-          Dispatch(sentences[i], e.start_ms, e.end_ms);
-        }
-        dispatched_in_utterance_ = confirmed;
-      }
+      DispatchGrowingText(e.text, e.start_ms, e.end_ms, /*isFinal=*/false);
     } else if (e.kind == core::STTEventKind::kFinalEOU) {
-      // The utterance is genuinely over now — the trailing fragment withheld
-      // above (if any) is safe to dispatch too.
-      auto sentences = SplitOrWhole(e.text);
-      for (size_t i = dispatched_in_utterance_; i < sentences.size(); i++) {
-        Dispatch(sentences[i], e.start_ms, e.end_ms);
-      }
-      dispatched_in_utterance_ = 0;
+      // The utterance is genuinely over now — every sentence found, plus any
+      // trailing unpunctuated fragment, is safe to dispatch.
+      DispatchGrowingText(e.text, e.start_ms, e.end_ms, /*isFinal=*/true);
+      dispatched_len_ = 0;
+      chunk_open_ms_ = -1;
       last_partial_text_.clear();
     }
+  }
+}
+
+void Session::DispatchGrowingText(const std::string &text, int64_t t0, int64_t t1, bool isFinal) {
+  auto sentences = pipeline::Sentences(text);
+  // Non-final: hold back the last sentence found until a *later* call proves
+  // it wasn't actually the still-growing trailing fragment (see the class
+  // doc comment on HandleEvents) — a streaming ASR model doesn't revise text
+  // once new words follow it, so only corroborated sentences are trustworthy
+  // here. Final (<EOU>/Stop): nothing is still growing, trust all of them.
+  size_t confirmed = sentences.empty() ? 0 : sentences.size() - (isFinal ? 0 : 1);
+
+  size_t searchFrom = 0;
+  for (size_t i = 0; i < confirmed; i++) {
+    size_t pos = text.find(sentences[i], searchFrom);
+    size_t startOff = (pos == std::string::npos) ? searchFrom : pos;
+    size_t endOff = (pos == std::string::npos) ? searchFrom : pos + sentences[i].size();
+    if (startOff >= dispatched_len_) {
+      Dispatch(sentences[i], t0, t1);
+      dispatched_len_ = endOff;
+      chunk_open_ms_ = -1;
+    } else if (endOff > dispatched_len_) {
+      // This sentence only came into existence because punctuation was
+      // recognized just after a kMaxChunkLatencyMs timeout already forced
+      // its opening words out as a raw chunk (see below) — re-dispatching
+      // the whole sentence now would speak that overlap twice. Absorb the
+      // (small, already-implied) trailing words into dispatched_len_ instead
+      // of re-translating them: a duplicate sentence spoken twice is far
+      // more jarring in a live call than a couple of trailing words silently
+      // folded into the chunk that already covered them.
+      dispatched_len_ = endOff;
+      chunk_open_ms_ = -1;
+    }
+    searchFrom = endOff;
+  }
+
+  std::string tail = sb::text::TrimSpace(text.substr(std::min(dispatched_len_, text.size())));
+  if (tail.empty()) {
+    chunk_open_ms_ = -1;
+    return;
+  }
+
+  if (isFinal) {
+    Dispatch(tail, t0, t1);
+    return;
+  }
+
+  // Time-based fallback: bound how long a run-on utterance can withhold
+  // translation waiting for punctuation that streaming ASR may never surface
+  // mid-utterance (see the class doc comment on HandleEvents).
+  if (chunk_open_ms_ < 0) {
+    chunk_open_ms_ = t1;
+    return;
+  }
+  if (t1 - chunk_open_ms_ >= kMaxChunkLatencyMs) {
+    Dispatch(tail, t0, t1);
+    dispatched_len_ = text.size();
+    chunk_open_ms_ = -1;
   }
 }
 
