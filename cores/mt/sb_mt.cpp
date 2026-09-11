@@ -41,6 +41,18 @@ int DefaultMTThreads() {
   if (hw == 0) return 4;  // hardware_concurrency() is allowed to return 0 if undetectable
   return static_cast<int>(std::min(hw, 8u));
 }
+
+// llama.cpp has no "offload everything" sentinel — a plain large integer is
+// the standard idiom (llama.cpp examples commonly use 999): n_gpu_layers is
+// clamped internally to the model's real layer count, so this is safe even
+// on a model with far fewer layers. Only "cpu" forces 0; "auto" requests GPU
+// too — if SB_METAL/SB_CUDA wasn't compiled in, or no matching device is
+// present at runtime, llama.cpp silently keeps everything on CPU on its own.
+constexpr int kGPULayersAll = 999;
+
+int GPULayersFor(const std::string &device) {
+  return device == "cpu" ? 0 : kGPULayersAll;
+}
 } // namespace
 
 struct sb_mt_model {
@@ -61,14 +73,14 @@ extern "C" {
 
 SB_API int sb_mt_abi_version(void) { return SB_ABI_VERSION; }
 
-SB_API sb_mt_model *sb_mt_model_load(const char *path, int n_ctx) {
+SB_API sb_mt_model *sb_mt_model_load(const char *path, int n_ctx, const char *device) {
     if (!path || !*path) return nullptr;
     std::call_once(g_backend_once, backend_init);
     try {
         auto *m = new sb_mt_model();
         m->n_ctx = n_ctx > 0 ? n_ctx : 512;
         llama_model_params mp = llama_model_default_params();
-        mp.n_gpu_layers = 0;   // CPU-first; Metal wiring lands with SB_METAL
+        mp.n_gpu_layers = GPULayersFor(device ? device : "auto");
         m->model = llama_model_load_from_file(path, mp);
         if (!m->model) { delete m; return nullptr; }
         return m;

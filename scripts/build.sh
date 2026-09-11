@@ -15,7 +15,10 @@
 #   --clean        remove build/ and lib/ and app binaries first
 #   --cores-only   stop after cores + symbol check
 #   --app-only     skip cores, only build the server (+ frontend)
-#   --metal        build cores' ggml with the Metal backend (needs full Xcode)
+#   --metal        build cores' ggml with the Metal backend (needs full Xcode; macOS only)
+#   --cuda         build cores' ggml with the CUDA backend (needs CUDA toolkit; Linux only)
+#                  covers stt/mt/tts_magpie; tts_vits stays CPU-only either way
+#                  (see docs/blockers.md #16)
 #   -j N           parallelism (default: CPU count)
 set -euo pipefail
 
@@ -28,6 +31,7 @@ DO_APP=1
 DO_CLEAN=0
 CORES_ONLY=0
 METAL=0
+CUDA=0
 JOBS=""
 
 while [[ $# -gt 0 ]]; do
@@ -38,12 +42,18 @@ while [[ $# -gt 0 ]]; do
     --cores-only) CORES_ONLY=1; DO_APP=0 ;;
     --app-only)   DO_CORES=0 ;;
     --metal)      METAL=1 ;;
+    --cuda)       CUDA=1 ;;
     -j)           shift; JOBS="$1" ;;
     -j*)          JOBS="${1#-j}" ;;
     *) echo "build.sh: unknown flag: $1" >&2; exit 2 ;;
   esac
   shift
 done
+
+if [[ "$METAL" == "1" && "$CUDA" == "1" ]]; then
+  echo "build.sh: --metal and --cuda are mutually exclusive" >&2
+  exit 2
+fi
 
 # --- platform detection ---------------------------------------------------
 UNAME="$(uname -sm)"
@@ -78,6 +88,13 @@ if [[ "$METAL" == "1" ]]; then
   METAL_ARG=(-DSB_METAL=ON)
 fi
 
+CUDA_ARG=(-DSB_CUDA=OFF)
+if [[ "$CUDA" == "1" ]]; then
+  [[ "$PLATFORM" == "linux" ]] || { echo "build.sh: --cuda is Linux only" >&2; exit 2; }
+  command -v nvcc >/dev/null 2>&1 || echo "build.sh: warning: nvcc not found on PATH — the CUDA build will likely fail" >&2
+  CUDA_ARG=(-DSB_CUDA=ON)
+fi
+
 LIB_DIR="$ROOT/lib"
 BUILD_DIR="$ROOT/build"
 CORES=(stt mt tts_magpie tts_vits)
@@ -87,6 +104,7 @@ echo "    platform   : $PLATFORM ($UNAME)"
 echo "    build type : $BUILD_TYPE"
 echo "    jobs       : $JOBS"
 echo "    metal      : $METAL"
+echo "    cuda       : $CUDA"
 
 if [[ "$DO_CLEAN" == "1" ]]; then
   echo "==> clean"
@@ -106,7 +124,8 @@ if [[ "$DO_CORES" == "1" ]]; then
     cmake -S "$src" -B "$bld" \
       -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
       "${CMAKE_PLATFORM_ARGS[@]}" \
-      "${METAL_ARG[@]}"
+      "${METAL_ARG[@]}" \
+      "${CUDA_ARG[@]}"
     cmake --build "$bld" -j "$JOBS"
 
     found=""

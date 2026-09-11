@@ -16,6 +16,7 @@ if(APPLE AND NOT CMAKE_OSX_DEPLOYMENT_TARGET)
 endif()
 
 option(SB_METAL "Build the engine's ggml with the Metal backend (needs full Xcode)" OFF)
+option(SB_CUDA  "Build the engine's ggml with the CUDA backend (needs CUDA toolkit)" OFF)
 
 set(SB_COMMON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../common")
 set(SB_ENGINE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/magpie-tts.cpp")
@@ -32,6 +33,16 @@ if(SB_METAL AND APPLE)
   set(MAGPIE_GGML_METAL       ON CACHE BOOL "" FORCE)
   set(GGML_METAL              ON CACHE BOOL "" FORCE)
   set(GGML_METAL_EMBED_LIBRARY ON CACHE BOOL "" FORCE)
+endif()
+
+if(SB_CUDA)
+  if(APPLE)
+    message(FATAL_ERROR "SB_CUDA is not supported on Apple hardware; use SB_METAL instead")
+  endif()
+  # magpie-tts.cpp forwards this to its own vendored ggml's GGML_CUDA (see
+  # third_party/magpie-tts.cpp/CMakeLists.txt); its Backend class auto-selects
+  # a non-CPU ggml device at runtime the same way parakeet.cpp's does.
+  set(MAGPIE_GGML_CUDA ON CACHE BOOL "" FORCE)
 endif()
 
 add_subdirectory(${SB_ENGINE_DIR} "${CMAKE_BINARY_DIR}/engine" EXCLUDE_FROM_ALL)

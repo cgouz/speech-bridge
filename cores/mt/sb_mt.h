@@ -2,7 +2,7 @@
  *
  * Backed by llama.cpp running MADLAD-400 3B (T5). Prompt form "<2xx> text" is
  * built internally. Context: 512 tokens. One SENTENCE per call (constraint 5).
- * MADLAD emits Uzbek in CYRILLIC — the Go `text` package transliterates.
+ * MADLAD emits Uzbek in CYRILLIC — server/src/text transliterates.
  *
  * Implemented in milestone 2. See ../common/sb_abi.h.
  */
@@ -20,7 +20,13 @@ typedef struct sb_mt_ctx   sb_mt_ctx;
 
 SB_API int sb_mt_abi_version(void);
 
-SB_API sb_mt_model *sb_mt_model_load(const char *path, int n_ctx /* 512 */);
+/* device: "cpu" | "metal" | "cuda" | "auto" (NULL treated as "auto"). "auto"
+ * and any named GPU backend both offload every layer when SB_METAL/SB_CUDA
+ * was compiled in and a matching device is actually present at runtime;
+ * llama.cpp falls back to CPU on its own otherwise — this is a request, not
+ * a guarantee. */
+SB_API sb_mt_model *sb_mt_model_load(const char *path, int n_ctx /* 512 */,
+                                     const char *device);
 SB_API void         sb_mt_model_free(sb_mt_model *m);
 SB_API const char  *sb_mt_model_last_error(sb_mt_model *m);
 

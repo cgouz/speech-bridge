@@ -36,7 +36,7 @@
 extern "C" {
 #endif
 
-/* 0 = OK; negative = error. Keep in sync with app/internal/core. */
+/* 0 = OK; negative = error. Keep in sync with server/src/native. */
 typedef int sb_status;
 
 #define SB_OK                 0
@@ -46,8 +46,11 @@ typedef int sb_status;
 #define SB_ERR_UNSUPPORTED   -4  /* e.g. unsupported language */
 #define SB_ERR_BUSY          -5
 
-/* ABI revision of the sb_* core surface. Bump on any breaking change. */
-#define SB_ABI_VERSION 1
+/* ABI revision of the sb_* core surface. Bump on any breaking change.
+ * v2: sb_mt_model_load() gained a trailing `device` parameter (see sb_mt.h)
+ * to make GPU offload requestable for MT, matching sb_stt_model_load() and
+ * sb_tts_model_load(). */
+#define SB_ABI_VERSION 2
 
 #ifdef __cplusplus
 } /* extern "C" */

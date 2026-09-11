@@ -56,6 +56,18 @@ check: ## build cores -> check-symbols -> smoke test -> build server -> unit tes
 run: app ## run sb-server with the current environment
 	@SB_LIB_DIR=$(ROOT)lib ./sb-server
 
+.PHONY: run-cpu
+run-cpu: ## build + run, CPU-only (any supported platform)
+	@scripts/run-cpu.sh $(if $(JOBS),-j $(JOBS),)
+
+.PHONY: run-metal
+run-metal: ## build + run with the Metal backend (macOS arm64, full Xcode)
+	@scripts/run-metal.sh $(if $(JOBS),-j $(JOBS),)
+
+.PHONY: run-cuda
+run-cuda: ## build + run with the CUDA backend (Linux x86_64 + NVIDIA GPU)
+	@scripts/run-cuda.sh $(if $(JOBS),-j $(JOBS),)
+
 .PHONY: fetch-models
 fetch-models: ## download + sha256-verify model weights
 	@scripts/fetch-models.sh

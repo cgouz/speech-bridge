@@ -556,3 +556,63 @@ with the app's actual default settings (`ru`→`uz`): audio sample counts now
 scale with translated-sentence length (e.g. 43409 samples / 16kHz = 2.71s for
 a 34-character sentence — before the fix, every sentence regardless of length
 was well under 1s). `make test-e2e` and `sb_tests` (109 assertions) pass.
+
+---
+
+## 16. GPU backends: CUDA added; MT's Metal wiring was never actually live
+
+**Status:** stt/mt/tts_magpie: CUDA and Metal both wired, CPU-verified only
+(no GPU hardware in development — same caveat as #4). tts_vits: CPU-only on
+every backend, by design (see below).
+
+Added `SB_CUDA` (mirrors the existing `SB_METAL`) to `cores/{stt,mt,tts_magpie}`'s
+CMakeLists, forwarding to each vendored engine's own CUDA option
+(`PARAKEET_GGML_CUDA`, `GGML_CUDA` directly for llama.cpp, `MAGPIE_GGML_CUDA`)
+— all three already anticipated this cleanly, no vendored-file edits needed.
+`scripts/build.sh --cuda` (Linux only; `--metal` and `--cuda` are mutually
+exclusive) and three new run scripts, one per target:
+`scripts/run-{cpu,metal,cuda}.sh` — each checks its own prerequisites (right
+OS/arch, `xcrun --find metal` / `nvcc` + `nvidia-smi`) and refuses with a
+clear message rather than attempting a build doomed to fail. `doctor.sh` now
+reports CUDA toolkit + driver presence on Linux the same way it already
+reports the Metal toolchain on macOS.
+
+**Found while wiring this: MT never actually used Metal, despite #4 saying it
+was "wired."** `cores/mt/sb_mt.cpp`'s `sb_mt_model_load` had
+`mp.n_gpu_layers = 0` hardcoded — compiling llama.cpp's ggml with
+`GGML_METAL=ON` makes the backend *available*, but llama.cpp still needs
+`n_gpu_layers > 0` to actually offload anything to it, and that was pinned to
+zero unconditionally. So even a full-Xcode `--metal` build ran MT on CPU the
+entire time. `sb_stt.cpp` (parakeet.cpp) and `sb_tts_magpie.cpp`
+(magpie-tts.cpp) don't have this problem: both engines' `Backend` class
+enumerates `ggml_backend_dev_*` at runtime and auto-selects the first
+non-CPU device on its own — no per-call layer count to wire — so Metal (and
+now CUDA) already worked for STT and magpie-TTS as soon as #4 compiled them
+in; MT was the one silent gap.
+
+**Fix:** `sb_mt_model_load` gained a `device` parameter (`cpu|metal|cuda|auto`,
+matching `sb_stt_model_load`/`sb_tts_model_load`'s existing convention) and
+sets `n_gpu_layers` to `999` (llama.cpp's own idiom for "offload everything
+that exists" — internally clamped to the model's real layer count) for
+anything but `"cpu"`. This is a breaking change to a public core function
+signature, so `SB_ABI_VERSION` bumped 1 → 2 (`cores/common/sb_abi.h`) and
+`cores/smoke/sb_smoke.c`'s hardcoded expectation moved with it. `SB_DEVICE`
+(`server/src/config.cpp`) now accepts `cuda` alongside `cpu|metal|auto`.
+Verified: full clean rebuild, symbol check, one-process dlopen smoke test (all
+four cores report `abi_version() == 2`), `sb_tests` (109 assertions),
+`make test-e2e`, plus a live server round-trip (`/v1/speak`,
+`/v1/speech-to-speech`) — all CPU-only, on this Linux x86_64 host.
+
+**tts_vits (sherpa-onnx) stays CPU-only on every backend, deliberately — not
+an oversight.** sherpa-onnx's own CUDA path (`SHERPA_ONNX_ENABLE_GPU`) needs a
+GPU onnxruntime build that *requires* `BUILD_SHARED_LIBS=ON`
+(`third_party/sherpa-onnx/CMakeLists.txt` forces it), which conflicts with
+this core's static-link isolation — the same isolation #11's onnxruntime
+1.18.1 pin already depends on being intact. It would also mean fetching yet
+another, much larger onnxruntime archive (the GPU build) alongside the CPU
+one already vendored there. `cores/tts_vits/CMakeLists.txt` declares `SB_CUDA`
+as an accepted-but-unused option (matching its existing `SB_METAL` line) so
+`--cuda`/`--metal` builds don't error on this core; it just keeps synthesizing
+on CPU. Net effect in a `--cuda`/`--metal` build: STT, MT, and magpie-TTS (the
+`ar/de/en/es/fr/hi/it/ko/pt-BR/vi` targets) get GPU acceleration; the VITS
+voices (`ru/uz/kaa`) do not.

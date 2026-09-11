@@ -30,7 +30,7 @@ struct Config {
   std::string log_level;   // debug|info|warn|error
   std::string log_format;  // json|text
 
-  std::string device;  // cpu|metal|auto
+  std::string device;  // cpu|metal|cuda|auto
 };
 
 class ConfigError : public std::runtime_error {

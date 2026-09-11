@@ -14,7 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define SB_ABI_EXPECTED 1
+#define SB_ABI_EXPECTED 2
 
 typedef int (*abi_fn)(void);
 

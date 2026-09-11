@@ -21,7 +21,7 @@ static sb_status (*p_stt_finish)(sb_stt_stream *);
 /* ---------------- MT ---------------- */
 static void *h_mt;
 static int (*p_mt_abi)(void);
-static sb_mt_model *(*p_mt_model_load)(const char *, int);
+static sb_mt_model *(*p_mt_model_load)(const char *, int, const char *);
 static void (*p_mt_model_free)(sb_mt_model *);
 static const char *(*p_mt_model_last_error)(sb_mt_model *);
 static sb_mt_ctx *(*p_mt_ctx_new)(sb_mt_model *);
@@ -140,7 +140,7 @@ sb_status sbn_stt_finish(sb_stt_stream *s) { return p_stt_finish(s); }
 
 /* ---- MT wrappers ---- */
 int sbn_mt_abi_version(void) { return p_mt_abi ? p_mt_abi() : -1; }
-sb_mt_model *sbn_mt_model_load(const char *p, int n) { return p_mt_model_load(p, n); }
+sb_mt_model *sbn_mt_model_load(const char *p, int n, const char *device) { return p_mt_model_load(p, n, device); }
 void sbn_mt_model_free(sb_mt_model *m) { p_mt_model_free(m); }
 const char *sbn_mt_model_last_error(sb_mt_model *m) { return p_mt_model_last_error(m); }
 sb_mt_ctx *sbn_mt_ctx_new(sb_mt_model *m) { return p_mt_ctx_new(m); }

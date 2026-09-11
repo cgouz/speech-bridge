@@ -16,6 +16,15 @@ if(APPLE AND NOT CMAKE_OSX_DEPLOYMENT_TARGET)
 endif()
 
 option(SB_METAL "unused for this core" OFF)
+# sherpa-onnx CAN use CUDA (SHERPA_ONNX_ENABLE_GPU), but only against a GPU
+# onnxruntime build that requires BUILD_SHARED_LIBS=ON — incompatible with
+# this core's static-link isolation (the whole point of one .so per core; see
+# docs/blockers.md #11's onnxruntime pinning story for how fragile that
+# boundary already is) and a different, much larger onnxruntime archive than
+# the CPU one already pinned above. Not wired; see docs/blockers.md #16. This
+# core stays CPU-only even in a --cuda build — the other three still get GPU
+# acceleration.
+option(SB_CUDA "unused for this core — see docs/blockers.md #16" OFF)
 
 set(SB_COMMON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../common")
 set(SB_ENGINE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/sherpa-onnx")

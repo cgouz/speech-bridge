@@ -143,8 +143,8 @@ Config LoadConfig() {
   if (c.log_format != "json" && c.log_format != "text") {
     errs.push_back("SB_LOG_FORMAT: \"" + c.log_format + "\" (want json|text)");
   }
-  if (c.device != "cpu" && c.device != "metal" && c.device != "auto") {
-    errs.push_back("SB_DEVICE: \"" + c.device + "\" (want cpu|metal|auto)");
+  if (c.device != "cpu" && c.device != "metal" && c.device != "cuda" && c.device != "auto") {
+    errs.push_back("SB_DEVICE: \"" + c.device + "\" (want cpu|metal|cuda|auto)");
   }
   if (!IsDir(c.lib_dir)) {
     errs.push_back("SB_LIB_DIR: \"" + c.lib_dir + "\" is not a directory");

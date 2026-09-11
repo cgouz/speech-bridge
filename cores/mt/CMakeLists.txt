@@ -15,6 +15,7 @@ if(APPLE AND NOT CMAKE_OSX_DEPLOYMENT_TARGET)
 endif()
 
 option(SB_METAL "Build llama.cpp's ggml with the Metal backend (needs full Xcode)" OFF)
+option(SB_CUDA  "Build llama.cpp's ggml with the CUDA backend (needs CUDA toolkit)" OFF)
 
 set(SB_COMMON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../common")
 set(SB_ENGINE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/llama.cpp")
@@ -37,6 +38,13 @@ if(SB_METAL AND APPLE)
   set(GGML_METAL_EMBED_LIBRARY ON CACHE BOOL "" FORCE)
 else()
   set(GGML_METAL OFF CACHE BOOL "" FORCE)
+endif()
+
+if(SB_CUDA)
+  if(APPLE)
+    message(FATAL_ERROR "SB_CUDA is not supported on Apple hardware; use SB_METAL instead")
+  endif()
+  set(GGML_CUDA ON CACHE BOOL "" FORCE)
 endif()
 
 add_subdirectory(${SB_ENGINE_DIR} "${CMAKE_BINARY_DIR}/engine" EXCLUDE_FROM_ALL)

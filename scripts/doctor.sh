@@ -61,6 +61,16 @@ if [[ "$UNAME" == "Linux x86_64" ]]; then
   ramgb=$(( $(awk '/MemTotal/{print $2}' /proc/meminfo) / 1048576 ))
   say "RAM" "${ramgb} GB"
   [[ "$ramgb" -lt 8 ]] && warn "RAM" "<8 GB on Linux — model loads may fail"
+  if command -v nvcc >/dev/null 2>&1; then
+    say "cuda toolkit" "$(nvcc --version | tail -1) (--cuda builds enabled)"
+  else
+    warn "cuda toolkit" "nvcc not found — CPU-only; install the CUDA toolkit for --cuda"
+  fi
+  if command -v nvidia-smi >/dev/null 2>&1; then
+    say "nvidia driver" "$(nvidia-smi --query-gpu=name,driver_version --format=csv,noheader 2>/dev/null | head -1 || echo present)"
+  else
+    warn "nvidia driver" "nvidia-smi not found — a --cuda build would compile but have no GPU to run on"
+  fi
 fi
 
 echo

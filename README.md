@@ -46,7 +46,10 @@ make doctor
 ./scripts/build.sh                # cores + symbol check + smoke + frontend + server
 #   -> lib/libsb_*.so   (release builds pin AVX2+FMA, no -march=native)
 #   -> sb-server
+./scripts/build.sh --cuda         # + CUDA ggml backend (needs the CUDA toolkit + an NVIDIA GPU)
 ```
+`--cuda` accelerates stt, mt, and tts_magpie; tts_vits (sherpa-onnx) stays
+CPU-only either way — see `docs/blockers.md` #16.
 
 ### macOS arm64
 ```sh
@@ -79,8 +82,17 @@ is used as-is. See `web/frontend/README.md`.
 
 ## Run
 ```sh
-make run                                              # SB_BIND defaults to 127.0.0.1:8080
+make run                                              # SB_BIND defaults to 127.0.0.1:8080; builds if needed via `app`
+make run-cpu                                          # explicit CPU-only build + run, any supported platform
+make run-metal                                        # macOS arm64 + full Xcode: build --metal, run with SB_DEVICE=metal
+make run-cuda                                         # Linux x86_64 + NVIDIA GPU: build --cuda, run with SB_DEVICE=cuda
 ```
+The three `run-*` targets each rebuild cores with the matching backend flag
+(switching backends needs a cores rebuild, not just the server) and check
+their own prerequisites first — `scripts/doctor.sh` reports the same checks
+up front. `run-metal`/`run-cuda` are wired and CPU-verified only; no Metal or
+CUDA hardware was available to verify them end-to-end here (`docs/blockers.md`
+#4, #16).
 - `GET  /`                     Vue frontend (setup, live session, batch panel, observability)
 - `GET  /health /ready /metrics /v1/capabilities`
 - `POST /v1/speech-to-speech`  multipart WAV → transcript + translation + audio

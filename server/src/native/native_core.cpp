@@ -181,9 +181,10 @@ class NativeMT final : public MT {
   sb_mt_model *m_;
 };
 
-std::unique_ptr<MT> LoadNativeMT(const std::string &libPath, const std::string &modelPath, int nCtx) {
+std::unique_ptr<MT> LoadNativeMT(const std::string &libPath, const std::string &modelPath, int nCtx,
+                                 const std::string &device) {
   OpenLib(1, libPath, "mt");
-  sb_mt_model *m = sbn_mt_model_load(modelPath.c_str(), nCtx);
+  sb_mt_model *m = sbn_mt_model_load(modelPath.c_str(), nCtx, device.c_str());
   if (!m) throw CoreError("core: model load failed: sb_mt_model_load(" + modelPath + ")");
   return std::make_unique<NativeMT>(m);
 }
@@ -295,7 +296,7 @@ Set Load(const Options &opt) {
   }
   if (!o.mt_model.empty()) {
     try {
-      s.mt = LoadNativeMT(LibPath(o.lib_dir, "libsb_mt"), o.mt_model, o.mt_ctx);
+      s.mt = LoadNativeMT(LibPath(o.lib_dir, "libsb_mt"), o.mt_model, o.mt_ctx, o.device);
       s.report["mt"] = "ok";
     } catch (const std::exception &e) {
       s.report["mt"] = e.what();

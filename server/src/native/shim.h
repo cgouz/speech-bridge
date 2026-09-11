@@ -50,7 +50,7 @@ sb_status       sbn_stt_finish(sb_stt_stream *s);
 
 /* ---- MT ---- */
 int          sbn_mt_abi_version(void);
-sb_mt_model *sbn_mt_model_load(const char *path, int n_ctx);
+sb_mt_model *sbn_mt_model_load(const char *path, int n_ctx, const char *device);
 void         sbn_mt_model_free(sb_mt_model *m);
 const char  *sbn_mt_model_last_error(sb_mt_model *m);
 sb_mt_ctx   *sbn_mt_ctx_new(sb_mt_model *m);
